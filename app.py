@@ -15,16 +15,32 @@ Ce prototype utilise la **nouvelle API publique officielle** (v2.1) de [data.eco
 # --- Fonction de chargement depuis l’API (CORRIGÉE) ---
 @st.cache_data(ttl=3600)
 def load_data(limit=10000):
-    # AJOUT de '&select=*' pour satisfaire les exigences minimales de l'API v2.1 ODSQL.
-    # L'URL finale demandée est : .../records?limit=10000&select=*
-    api_url = (
+    # URL de base du endpoint /records
+    base_url = (
         f"https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/"
-        f"rappelconso-v2-gtin-espaces/records?limit={limit}&select=*" 
+        f"rappelconso-v2-gtin-espaces/records"
     )
 
+    # Utilisation d'un dictionnaire de paramètres pour tous les arguments de requête.
+    # On réintroduit le tri descendant, car il est nécessaire, mais on laisse 'requests' l'encoder.
+    params = {
+        "limit": limit,
+        # Tri descendant (-), syntaxe standard d'ODSQL
+        "order_by": "-date_publication" 
+    }
+
     try:
-        r = requests.get(api_url, timeout=30)
+        # La requête utilise le dictionnaire 'params' pour construire l'URL complète
+        r = requests.get(base_url, params=params, timeout=30)
+        
+        # Le serveur OpenDataSoft v2.1 a besoin d'une syntaxe précise pour 'order_by'
+        # Si la première requête échoue, on tente une version sans tri pour isoler le problème.
+        if r.status_code == 400:
+            params_safe = {"limit": limit}
+            r = requests.get(base_url, params=params_safe, timeout=30)
+            
         r.raise_for_status()
+        
         data = r.json()
         records = data.get("results", [])
         if not records:
@@ -40,7 +56,6 @@ def load_data(limit=10000):
             "motif_du_rappel", "distributeurs",
             "liens_vers_la_fiche_rappel", "zone_geographique_de_vente"
         ]
-        # Assurez-vous que les colonnes existent avant de les sélectionner
         df = df[[c for c in cols if c in df.columns]]
 
         if "date_publication" in df.columns:
@@ -49,7 +64,9 @@ def load_data(limit=10000):
         return df
 
     except Exception as e:
-        st.error(f"❌ Erreur lors du chargement des données depuis l’API : {e}")
+        # Affiche l'URL qui a causé l'erreur pour un meilleur débogage
+        st.error(f"❌ Erreur lors du chargement des données depuis l’API ({r.status_code} - {r.reason}) : {r.url}")
+        st.error(f"Message d'erreur complet : {e}")
         return pd.DataFrame()
 
 
