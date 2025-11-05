@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import plotly.express as px
 from datetime import datetime
+import numpy as np # Ajout pour gestion des NA
 
 st.set_page_config(page_title="Recall Analytics (RappelConso) - B2B MVP", layout="wide")
 st.title("🚀 Recall Analytics — Dashboard d'Intelligence Marché (MVP B2B)")
@@ -83,16 +84,19 @@ def load_data(limit=10000):
 # --- FONCTION UTILITAIRE POUR L'ANALYSE MULTI-VALEUR ---
 def explode_column(df, column_name):
     """Divise une colonne de chaînes de caractères séparées par des points-virgules (;) en lignes distinctes."""
-    if column_name in df.columns:
-        return (
+    if column_name in df.columns and not df.empty:
+        # S'assure que la colonne est du type objet pour la division
+        df[column_name] = df[column_name].astype(str) 
+        
+        # Le rename est crucial car la colonne créée par assign/split est temporaire
+        exploded_df = (
             df.assign(temp_col=df[column_name].str.split(";"))
             .explode("temp_col")
             .rename(columns={"temp_col": column_name})
-            .dropna(subset=[column_name])
-            .reset_index(drop=True)
         )
-    # Retourne un DataFrame vide
-    return pd.DataFrame()
+        # Nettoie les lignes où la valeur est NaN ou 'nan' (résultat de la conversion en str)
+        return exploded_df.dropna(subset=[column_name])
+    return pd.DataFrame() # Retourne un DataFrame vide s'il n'y a pas de colonne ou de données.
 
 # --- Chargement des données ---
 df = load_data()
@@ -105,44 +109,43 @@ if df.empty:
 st.sidebar.header("Filtres d'Intelligence Marché")
 df_temp = df.copy()
 
-# 1. Distributeurs (Explode needed - Correction de l'AttributeError)
-distrib_col_name = "distributeurs"
-distributeurs_list = ["Toutes"] # Initialisation sûre
+# Fonction générique pour construire les listes de filtres de manière stable
+def safe_filter_list(df_source, col_name, exploded=False):
+    if col_name not in df_source.columns or df_source.empty:
+        return ["Toutes"]
+    
+    if exploded:
+        df_work = explode_column(df_source, col_name)
+    else:
+        df_work = df_source.copy()
 
-if distrib_col_name in df_temp.columns:
-    df_exploded_distrib = explode_column(df_temp, distrib_col_name)
+    if col_name in df_work.columns and not df_work.empty:
+        # Utilise des méthodes Python pures sur une liste pour une robustesse maximale
+        # S'assure de convertir en chaîne, enlève l'espace, filtre les vides et 'nan'
+        raw_list = df_work[col_name].astype(str).unique().tolist()
+        
+        valid_list = []
+        for s in raw_list:
+            stripped = s.strip()
+            # Ajoute le filtre pour 'nan' qui peut provenir de la conversion de np.nan en str
+            if stripped and stripped != 'nan':
+                valid_list.append(stripped)
+        
+        return ["Toutes"] + sorted(list(set(valid_list)))
+    
+    return ["Toutes"]
 
-    # VÉRIFICATION FINALE ROBUSTE : Vérifie si la colonne existe DANS le DataFrame explosé.
-    if distrib_col_name in df_exploded_distrib.columns and not df_exploded_distrib.empty:
-        valid_distrib = (
-            df_exploded_distrib[distrib_col_name]
-            .astype(str)
-            .str.strip()
-            .replace('', pd.NA, regex=False)
-            .dropna()
-            .unique()
-            .tolist()
-        )
-        distributeurs_list = ["Toutes"] + sorted(valid_distrib)
+# 1. Distributeurs
+distributeurs_list = safe_filter_list(df_temp, "distributeurs", exploded=True)
 
+# 2. Motifs
+motifs_list = safe_filter_list(df_temp, "motif_du_rappel")
 
-# 2. Motifs (Simple column)
-if "motif_du_rappel" in df_temp.columns:
-    motifs_list = ["Toutes"] + sorted(df_temp["motif_du_rappel"].dropna().unique().tolist())
-else:
-    motifs_list = ["Toutes"]
+# 3. Categories
+categories = safe_filter_list(df_temp, "categorie_de_produit")
 
-# 3. Categories (Simple column)
-if "categorie_de_produit" in df_temp.columns:
-    categories = ["Toutes"] + sorted(df_temp["categorie_de_produit"].dropna().unique().tolist())
-else:
-    categories = ["Toutes"]
-
-# 4. Marques (Simple column)
-if "nom_marque_du_produit" in df_temp.columns:
-    marques = ["Toutes"] + sorted(df_temp["nom_marque_du_produit"].dropna().unique().tolist())
-else:
-    marques = ["Toutes"]
+# 4. Marques
+marques = safe_filter_list(df_temp, "nom_marque_du_produit")
 
 # Widgets de filtres
 periode = st.sidebar.selectbox("Période d'Analyse", ["12 derniers mois", "6 derniers mois", "3 derniers mois", "Toute la période"])
@@ -187,11 +190,10 @@ col2.metric("Marques Impactées", df_filtered["nom_marque_du_produit"].nunique()
 
 # Analyse du Risque le plus Fréquent
 df_risques_exploded = explode_column(df_filtered, "risques_encourus")
-# Défense contre l'absence de colonnes après explode
 if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.columns:
-    # Vérifie si la série n'est pas vide avant de prendre l'index[0]
-    if not df_risques_exploded["risques_encourus"].value_counts().empty:
-        risque_major = df_risques_exploded["risques_encourus"].value_counts().index.get(0)
+    risque_counts = df_risques_exploded["risques_encourus"].value_counts()
+    if not risque_counts.empty:
+        risque_major = risque_counts.index.get(0)
         col3.metric("Risque Principal", risque_major.title())
     else:
         col3.metric("Risque Principal", "N/A")
@@ -199,11 +201,10 @@ else:
     col3.metric("Risque Principal", "N/A")
 
 # Taux de Risque Microbiologique
-if "motif_du_rappel" in df_filtered.columns:
+taux_microbien = "N/A"
+if "motif_du_rappel" in df_filtered.columns and total_rappels > 0:
     microbien_count = df_filtered[df_filtered["motif_du_rappel"].str.contains("microbiologique|salmonelle|listeria|ecoli", case=False, na=False)].shape[0]
-    taux_microbien = f"{(microbien_count / total_rappels * 100):.1f}%" if total_rappels > 0 else "0.0%"
-else:
-    taux_microbien = "N/A"
+    taux_microbien = f"{(microbien_count / total_rappels * 100):.1f}%"
 col4.metric("Taux de Risque Microbiologique", taux_microbien)
 
 st.markdown("---")
@@ -234,8 +235,9 @@ with col_left:
 with col_right:
     st.subheader("Analyse de Risque 💀 : Top 5 des Risques Encourus")
     if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.columns:
-        if not df_risques_exploded["risques_encourus"].value_counts().empty:
-            top_risques = df_risques_exploded["risques_encourus"].value_counts().reset_index().rename(columns={
+        risque_counts = df_risques_exploded["risques_encourus"].value_counts()
+        if not risque_counts.empty:
+            top_risques = risque_counts.reset_index().rename(columns={
                 "risques_encourus": "Risque", 
                 "count": "Nombre_de_Rappels"
             }).head(5)
@@ -277,12 +279,12 @@ with col_droite:
     if col_name in df_filtered.columns:
         df_exposed = explode_column(df_filtered, col_name)
         
-        # Filtre les entrées non valides
-        df_exposed = df_exposed[~df_exposed[col_name].isin(['nan', ''])]
-        
         if not df_exposed.empty and col_name in df_exposed.columns:
-            if not df_exposed[col_name].value_counts().empty:
-                top_exposure = df_exposed[col_name].value_counts().reset_index().rename(columns={
+            # Nettoie les valeurs potentiellement vides
+            exposure_counts = df_exposed[col_name].value_counts()
+            
+            if not exposure_counts.empty:
+                top_exposure = exposure_counts.reset_index().rename(columns={
                     col_name: "Cible", 
                     "count": "Nombre_de_Rappels"
                 }).head(10)
