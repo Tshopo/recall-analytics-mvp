@@ -30,6 +30,7 @@ def load_data(limit=10000):
         
         # Tentative 2 (limit réduite en cas d'échec 400 sur la première requête)
         if r.status_code == 400:
+            # Cette ligne est le log que vous avez vu, indiquant le passage en mode secours
             st.warning(f"La requête avec limit={limit} a échoué (400). Tentative avec limit=100 pour vérifier la disponibilité.")
             params_safe = {"limit": 100}
             r = requests.get(base_url, params=params_safe, timeout=30)
@@ -51,7 +52,7 @@ def load_data(limit=10000):
             "marque_produit": "nom_marque_du_produit",
             "categorie_produit": "categorie_de_produit",
             "motif_rappel": "motif_du_rappel",
-            "risques_encourus": "risques_encourus", # NOUVEAU
+            "risques_encourus": "risques_encourus",
             "lien_vers_la_fiche_rappel": "liens_vers_la_fiche_rappel",
             "date_publication": "date_publication",
             "distributeurs": "distributeurs",
@@ -70,7 +71,7 @@ def load_data(limit=10000):
         # Nettoyage des chaînes de caractères dans les colonnes multi-valeurs
         for col in ["distributeurs", "zone_geographique_de_vente", "risques_encourus"]:
             if col in df.columns:
-                 # Normalise les séparateurs (pipe | et virgule ,) en un seul
+                 # Normalise les séparateurs (pipe | et virgule ,) en un seul point-virgule
                 df[col] = df[col].astype(str).str.lower().str.replace("|", ";", regex=False).str.replace(", ", ";", regex=False).str.strip()
 
         return df
@@ -87,7 +88,6 @@ def load_data(limit=10000):
 def explode_column(df, column_name):
     """Divise une colonne de chaînes de caractères séparées par des points-virgules (;) en lignes distinctes."""
     if column_name in df.columns:
-        # Remplace '; ' ou '|' par ';' puis 'explose'
         return (
             df.assign(temp_col=df[column_name].str.split(";"))
             .explode("temp_col")
@@ -141,9 +141,8 @@ if marque != "Toutes" and "nom_marque_du_produit" in df_filtered.columns:
 if motif != "Toutes" and "motif_du_rappel" in df_filtered.columns:
     df_filtered = df_filtered[df_filtered["motif_du_rappel"] == motif]
 
-# Filtre Distributeur (utilise la recherche de sous-chaîne car la colonne n'est pas "explosée" dans df_filtered)
+# Filtre Distributeur (utilise la recherche de sous-chaîne)
 if distrib != "Toutes" and "distributeurs" in df_filtered.columns:
-    # Le filtre doit correspondre à une des sous-chaînes (ex: cherche 'aldi' dans 'aldi;carrefour')
     df_filtered = df_filtered[df_filtered["distributeurs"].str.contains(distrib, case=False, na=False)]
 
 
@@ -159,14 +158,15 @@ col2.metric("Marques Impactées", total_marques)
 
 # Analyse du Risque le plus Fréquent
 df_risques_exploded = explode_column(df_filtered, "risques_encourus")
-risque_major = df_risques_exploded["risques_encourus"].value_counts().idxmax() if not df_risques_exploded.empty else "N/A"
-col3.metric("Risque Principal", risque_major)
+# Utilise get(0) pour gérer le cas où la Série est vide
+risque_major = df_risques_exploded["risques_encourus"].value_counts().index.get(0) if not df_risques_exploded.empty else "N/A"
+col3.metric("Risque Principal", risque_major.title()) # Met en majuscule pour la présentation
 
 # Taux de Microbien vs Inert (un KPI clé)
 if "motif_du_rappel" in df_filtered.columns:
     microbien_count = df_filtered[df_filtered["motif_du_rappel"].str.contains("microbiologique|salmonelle|listeria|ecoli", case=False, na=False)].shape[0]
-    inert_count = df_filtered[df_filtered["motif_du_rappel"].str.contains("verre|métal|plastique|inertes", case=False, na=False)].shape[0]
-    taux_microbien = f"{(microbien_count / total_rappels * 100):.1f}%" if total_rappels > 0 else "0%"
+    # Calcul basé sur le total filtré
+    taux_microbien = f"{(microbien_count / total_rappels * 100):.1f}%" if total_rappels > 0 else "0.0%"
 else:
     taux_microbien = "N/A"
 col4.metric("Taux de Risque Microbiologique", taux_microbien)
@@ -185,7 +185,7 @@ with col_left:
     if "nom_marque_du_produit" in df_filtered.columns and total_rappels > 0:
         top_marques = df_filtered["nom_marque_du_produit"].value_counts(normalize=True).mul(100).reset_index().rename(columns={
             "nom_marque_du_produit": "Marque", 
-            "proportion": "Part_de_Rappel_pourcent"
+            "proportion": "Part_de_Rappel_pourcent" # Renommage correct pour Pandas >= 2.x
         })
         top_marques = top_marques.head(10)
         fig_sor = px.pie(top_marques, values="Part_de_Rappel_pourcent", names="Marque", title="Distribution des rappels (%) sur le périmètre filtré")
@@ -241,6 +241,9 @@ with col_droite:
         # Explode pour un comptage précis
         df_exposed = explode_column(df_filtered, col_name)
         
+        # Filtre les entrées "nan" ou vides résultant du nettoyage/explode
+        df_exposed = df_exposed[~df_exposed[col_name].isin(['nan', ''])]
+        
         top_exposure = df_exposed[col_name].value_counts().reset_index().rename(columns={
             col_name: "Cible", 
             "count": "Nombre_de_Rappels"
@@ -264,7 +267,5 @@ csv = df_filtered[display_cols].to_csv(index=False)
 st.download_button(label="💾 Télécharger les Données Filtrées (CSV)", data=csv, file_name="recall_analytics_export.csv", mime="text/csv")
 
 st.markdown("---")
-st.caption("Prototype Recall Analytics — Données publiques © RappelConso.gouv.fr / Ministère de l'Économie")
-
-
-nnées publiques © RappelConso.gouv.fr / Ministère de l'Économie")
+# CORRECTION DU SYNTAXERROR: Remplacement de © par (c)
+st.caption("Prototype Recall Analytics — Données publiques (c) RappelConso.gouv.fr / Ministère de l'Économie")
