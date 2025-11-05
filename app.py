@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
-# On n'a plus besoin de requests ni de datetime pour cette version
 import plotly.express as px
-import os # Ajout pour vérifier l'existence du fichier
+import os 
+from datetime import datetime # Rétablie pour le filtrage temporel
 
 st.set_page_config(page_title="Recall Analytics (RappelConso) - B2B MVP", layout="wide")
 st.title("🚀 Recall Analytics — Dashboard d'Intelligence Marché (MVP B2B)")
@@ -12,7 +12,7 @@ st.markdown("""
 **Objectif :** Fournir des insights actionnables sur la fréquence, la gravité et l'exposition géographique des rappels.
 """)
 
-# --- FONCTION DE CHARGEMENT DE DONNÉES (MODIFIÉE POUR LE CSV) ---
+# --- FONCTION DE CHARGEMENT DE DONNÉES (Lecture CSV) ---
 @st.cache_data(ttl=3600)
 def load_data_from_csv(file_path="rappelconso_export.csv"):
     """Charge les données à partir d'un fichier CSV local (celui que vous avez téléchargé)."""
@@ -25,25 +25,23 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
         # Tente de lire le fichier
         df = pd.read_csv(file_path, sep=",") 
 
-        # Nettoyage et préparation des colonnes (similaire à la version API)
+        # Nettoyage et préparation des colonnes 
         
         # 1. Conversion de la date
         if "date_publication" in df.columns:
-            # S'assure de l'utiliser au format ISO 8601 pour éviter les erreurs de conversion
             df["date_publication"] = pd.to_datetime(df["date_publication"], errors="coerce", utc=True)
             df = df.sort_values(by="date_publication", ascending=False) 
 
         # 2. Nettoyage des colonnes multi-valeurs
         for col in ["distributeurs", "zone_geographique_de_vente", "risques_encourus", "motif_du_rappel", "categorie_de_produit", "nom_marque_du_produit"]:
             if col in df.columns:
-                # Normalise, convertit en minuscule et remplace les séparateurs courants par des points-virgules
                 df[col] = (df[col].astype(str)
                                  .str.lower()
                                  .str.replace("|", ";", regex=False)
                                  .str.replace(", ", ";", regex=False)
                                  .str.strip()
-                                 .replace('nan', '', regex=False) # Remplace la chaîne 'nan' par vide
-                                 .replace('', pd.NA) # Remplace la chaîne vide par NaN pour le nettoyage futur
+                                 .replace('nan', '', regex=False)
+                                 .replace('', pd.NA) 
                 )
 
         st.success(f"✅ {len(df)} enregistrements chargés depuis {file_path}.")
@@ -59,18 +57,11 @@ def explode_column(df, column_name):
     """Divise une colonne de chaînes de caractères séparées par des points-virgules (;) en lignes distinctes. 
        Retourne un DataFrame propre contenant uniquement la colonne explosée."""
     if column_name in df.columns and not df.empty:
-        # 1. Sélectionne la série et prépare l'explosion
         s = df[column_name].copy().astype(str).str.split(";")
-        
-        # 2. Explode la série
         exploded_s = s.explode()
-        
-        # 3. Convertit la série explosée en DataFrame
         exploded_df = exploded_s.to_frame(name=column_name)
         
-        # 4. Nettoyage : Retire les NaN, les chaînes vides et les chaînes "nan"
         exploded_df = exploded_df.dropna(subset=[column_name])
-        # Note: on ré-applique le strip ici, car l'explosion peut introduire des espaces si le séparateur était ' ;'
         exploded_df[column_name] = exploded_df[column_name].str.strip()
         exploded_df = exploded_df[exploded_df[column_name] != 'nan']
         exploded_df = exploded_df[exploded_df[column_name] != '']
@@ -90,7 +81,6 @@ def safe_filter_list(df_source, col_name, exploded=False):
         df_work = df_source.copy()
 
     if col_name in df_work.columns and not df_work.empty:
-        # Récupère la liste, enlève les valeurs non définies ou vides
         raw_list = df_work[col_name].dropna().astype(str).unique().tolist()
         
         valid_list = []
@@ -109,8 +99,6 @@ df = load_data_from_csv()
 if df.empty:
     st.warning("⚠️ L'application ne peut pas démarrer sans données. Vérifiez votre fichier CSV.")
     st.stop()
-
-# --- RESTE DU SCRIPT (Identique et stable) ---
 
 # --- FILTRES B2B EN SIDEBAR ---
 st.sidebar.header("Filtres d'Intelligence Marché")
@@ -170,15 +158,19 @@ col2.metric("Marques Impactées", df_filtered["nom_marque_du_produit"].nunique()
 
 # Analyse du Risque le plus Fréquent
 df_risques_exploded = explode_column(df_filtered, "risques_encourus")
+
+# Nouvelle vérification ultra-stable pour éviter l'erreur
 if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.columns:
     risque_counts = df_risques_exploded["risques_encourus"].value_counts()
+    
+    # Correction: Vérifier si la série des décomptes est non vide avant d'appeler .index.get(0)
     if not risque_counts.empty:
         risque_major = risque_counts.index.get(0)
         col3.metric("Risque Principal", risque_major.title())
     else:
-        col3.metric("Risque Principal", "N/A")
+        col3.metric("Risque Principal", "N/A (Filtres trop restrictifs)")
 else:
-    col3.metric("Risque Principal", "N/A")
+    col3.metric("Risque Principal", "N/A (Données manquantes)")
 
 # Taux de Risque Microbiologique
 taux_microbien = "N/A"
