@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os 
-from datetime import datetime # Rétablie pour le filtrage temporel
+from datetime import datetime 
 
 st.set_page_config(page_title="Recall Analytics (RappelConso) - B2B MVP", layout="wide")
 st.title("🚀 Recall Analytics — Dashboard d'Intelligence Marché (MVP B2B)")
@@ -25,8 +25,6 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
         # Tente de lire le fichier
         df = pd.read_csv(file_path, sep=",") 
 
-        # Nettoyage et préparation des colonnes 
-        
         # 1. Conversion de la date
         if "date_publication" in df.columns:
             df["date_publication"] = pd.to_datetime(df["date_publication"], errors="coerce", utc=True)
@@ -156,21 +154,21 @@ col1, col2, col3, col4 = st.columns(4)
 col1.metric("Total Rappels (Filtré)", total_rappels)
 col2.metric("Marques Impactées", df_filtered["nom_marque_du_produit"].nunique() if "nom_marque_du_produit" in df.columns else 0)
 
-# Analyse du Risque le plus Fréquent
+# Analyse du Risque le plus Fréquent (Correction anti-plantage)
 df_risques_exploded = explode_column(df_filtered, "risques_encourus")
 
-# Nouvelle vérification ultra-stable pour éviter l'erreur
+risque_principal = "N/A (Données manquantes)"
+
 if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.columns:
     risque_counts = df_risques_exploded["risques_encourus"].value_counts()
     
-    # Correction: Vérifier si la série des décomptes est non vide avant d'appeler .index.get(0)
     if not risque_counts.empty:
-        risque_major = risque_counts.index.get(0)
-        col3.metric("Risque Principal", risque_major.title())
-    else:
-        col3.metric("Risque Principal", "N/A (Filtres trop restrictifs)")
-else:
-    col3.metric("Risque Principal", "N/A (Données manquantes)")
+        # CORRECTION : Utilisation de next() avec une valeur par défaut pour éviter l'erreur d'indice 0
+        risque_major = next(iter(risque_counts.index), None)
+        if risque_major:
+            risque_principal = risque_major.title()
+
+col3.metric("Risque Principal", risque_principal)
 
 # Taux de Risque Microbiologique
 taux_microbien = "N/A"
