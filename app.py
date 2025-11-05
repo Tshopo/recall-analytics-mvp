@@ -91,8 +91,8 @@ def explode_column(df, column_name):
             .dropna(subset=[column_name])
             .reset_index(drop=True)
         )
-    # Retourne un DataFrame vide si la colonne n'existe pas ou un DataFrame avec la colonne si elle existe
-    return pd.DataFrame(columns=df.columns) if column_name not in df.columns else df
+    # Retourne un DataFrame vide SANS colonne si elle manque.
+    return pd.DataFrame()
 
 # --- Chargement des données ---
 df = load_data()
@@ -101,28 +101,31 @@ if df.empty:
     st.warning("⚠️ Impossible de charger les données depuis l’API RappelConso. Réessaie plus tard.")
     st.stop()
 
-# --- FILTRES B2B EN SIDEBAR (LOGIQUE DÉFENSIVE CORRIGÉE) ---
+# --- FILTRES B2B EN SIDEBAR (LOGIQUE DÉFENSIVE MISE À JOUR) ---
 st.sidebar.header("Filtres d'Intelligence Marché")
 df_temp = df.copy()
 
-# 1. Distributeurs (Explode needed - Correction de l'AttributeError)
-df_exploded_distrib = explode_column(df_temp, "distributeurs")
+# 1. Distributeurs (Explode needed - Correction finale de l'AttributeError)
 distrib_col_name = "distributeurs"
+distributeurs_list = ["Toutes"] # Initialisation sûre
 
-if distrib_col_name in df_exploded_distrib.columns:
-    # LIGNE CRUCIALE CORRIGÉE : Assure le typage string avant les opérations .str
-    valid_distrib = (
-        df_exploded_distrib[distrib_col_name]
-        .astype(str)
-        .str.strip()
-        .replace('', pd.NA, regex=False) # Remplace les chaînes vides par NA
-        .dropna()
-        .unique()
-        .tolist()
-    )
-    distributeurs_list = ["Toutes"] + sorted(valid_distrib)
-else:
-    distributeurs_list = ["Toutes"]
+if distrib_col_name in df_temp.columns:
+    df_exploded_distrib = explode_column(df_temp, distrib_col_name)
+
+    # VÉRIFICATION ROBUSTE : S'assurer que la colonne existe dans le résultat EXPLODED
+    if distrib_col_name in df_exploded_distrib.columns and not df_exploded_distrib.empty:
+        # LIGNE CRUCIALE CORRIGÉE : S'assurer du typage string avant les opérations .str,
+        # puis filtrer les valeurs vides.
+        valid_distrib = (
+            df_exploded_distrib[distrib_col_name]
+            .astype(str)
+            .str.strip()
+            .replace('', pd.NA, regex=False)
+            .dropna()
+            .unique()
+            .tolist()
+        )
+        distributeurs_list = ["Toutes"] + sorted(valid_distrib)
 
 
 # 2. Motifs (Simple column)
@@ -172,6 +175,7 @@ if motif != "Toutes" and "motif_du_rappel" in df_filtered.columns:
 
 # Filtre Distributeur
 if distrib != "Toutes" and "distributeurs" in df_filtered.columns:
+    # Utilise str.contains sur la colonne multi-valeurs de df_filtered
     df_filtered = df_filtered[df_filtered["distributeurs"].str.contains(distrib, case=False, na=False)]
 
 
