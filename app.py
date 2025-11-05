@@ -12,17 +12,25 @@ Bienvenue sur **Recall Analytics**, un tableau de bord interactif qui analyse le
 Ce prototype utilise la **nouvelle API publique officielle** (v2.1) de [data.economie.gouv.fr](https://data.economie.gouv.fr).
 """)
 
-# --- Fonction de chargement depuis l’API ---
+# --- Fonction de chargement depuis l’API (CORRIGÉE) ---
 @st.cache_data(ttl=3600)
 def load_data(limit=10000):
-    # Utilisation du signe - pour le tri descendant (sans espace ni encodage)
-    api_url = (
+    # Base URL sans les paramètres de requête
+    base_url = (
         f"https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/"
-        f"rappelconso-v2-gtin-espaces/records?limit={limit}&order_by=-date_publication"
+        f"rappelconso-v2-gtin-espaces/records"
     )
 
+    # Utilisation d'un dictionnaire de paramètres pour laisser 'requests' gérer l'encodage
+    # Utilisation de 'DESC' pour le tri descendant, plus robuste que le signe moins seul
+    params = {
+        "limit": limit,
+        "order_by": "date_publication DESC"
+    }
+
     try:
-        r = requests.get(api_url, timeout=30)
+        # La requête utilise le dictionnaire 'params'
+        r = requests.get(base_url, params=params, timeout=30)
         r.raise_for_status()
         data = r.json()
         records = data.get("results", [])
