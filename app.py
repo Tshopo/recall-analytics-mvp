@@ -15,10 +15,12 @@ Ce prototype utilise la **nouvelle API publique officielle** (v2.1) de [data.eco
 # --- Fonction de chargement depuis l’API ---
 @st.cache_data(ttl=3600)
 def load_data(limit=10000):
+    # Utilisation du signe - pour le tri descendant (sans espace ni encodage)
     api_url = (
-        "https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/"
-        f"rappelconso-v2-gtin-espaces/records?limit={limit}&order_by=date_publication DESC"
+        f"https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/"
+        f"rappelconso-v2-gtin-espaces/records?limit={limit}&order_by=-date_publication"
     )
+
     try:
         r = requests.get(api_url, timeout=30)
         r.raise_for_status()
@@ -30,7 +32,7 @@ def load_data(limit=10000):
 
         df = pd.json_normalize(records)
 
-        # Colonnes utiles
+        # Sélection et nettoyage
         cols = [
             "reference_fiche", "date_publication", "nom_du_produit",
             "nom_marque_du_produit", "categorie_de_produit",
@@ -39,7 +41,6 @@ def load_data(limit=10000):
         ]
         df = df[[c for c in cols if c in df.columns]]
 
-        # Conversion de la date
         if "date_publication" in df.columns:
             df["date_publication"] = pd.to_datetime(df["date_publication"], errors="coerce")
 
@@ -48,6 +49,7 @@ def load_data(limit=10000):
     except Exception as e:
         st.error(f"❌ Erreur lors du chargement des données depuis l’API : {e}")
         return pd.DataFrame()
+
 
 # --- Chargement des données ---
 df = load_data()
