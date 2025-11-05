@@ -59,7 +59,7 @@ def load_data(limit=10000): # Limite par défaut
         
         df = df.rename(columns=column_mapping)
 
-        # Sélection des colonnes nécessaires (doivent exister après le renommage)
+        # Sélection des colonnes nécessaires
         cols_finales = [
             "reference_fiche", "date_publication", "nom_du_produit",
             "nom_marque_du_produit", "categorie_de_produit",
@@ -69,6 +69,7 @@ def load_data(limit=10000): # Limite par défaut
         df = df[[c for c in cols_finales if c in df.columns]]
 
         if "date_publication" in df.columns:
+            # Conversion en datetime UTC-aware
             df["date_publication"] = pd.to_datetime(df["date_publication"], errors="coerce", utc=True)
             # Tri local car le tri API a été supprimé
             df = df.sort_values(by="date_publication", ascending=False) 
@@ -107,7 +108,9 @@ if marque != "Toutes" and "nom_marque_du_produit" in df_filtered.columns:
     df_filtered = df_filtered[df_filtered["nom_marque_du_produit"] == marque]
 
 if "date_publication" in df_filtered.columns:
-    now = pd.Timestamp(datetime.now())
+    # CORRECTION DU TYPE ERROR: Utiliser pd.Timestamp.now(tz='UTC') pour un objet timezone-aware (UTC)
+    now = pd.Timestamp.now(tz='UTC') 
+    
     if periode == "12 derniers mois":
         df_filtered = df_filtered[df_filtered["date_publication"] >= now - pd.DateOffset(months=12)]
     elif periode == "6 derniers mois":
