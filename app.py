@@ -3,7 +3,6 @@ import pandas as pd
 import requests
 import plotly.express as px
 from datetime import datetime
-import numpy as np # Ajout pour gestion des NA
 
 st.set_page_config(page_title="Recall Analytics (RappelConso) - B2B MVP", layout="wide")
 st.title("🚀 Recall Analytics — Dashboard d'Intelligence Marché (MVP B2B)")
@@ -81,21 +80,27 @@ def load_data(limit=10000):
         return pd.DataFrame()
 
 
-# --- FONCTION UTILITAIRE POUR L'ANALYSE MULTI-VALEUR ---
+# --- FONCTION UTILITAIRE POUR L'ANALYSE MULTI-VALEUR (CORRIGÉE) ---
 def explode_column(df, column_name):
-    """Divise une colonne de chaînes de caractères séparées par des points-virgules (;) en lignes distinctes."""
+    """Divise une colonne de chaînes de caractères séparées par des points-virgules (;) en lignes distinctes. 
+       Retourne un DataFrame propre contenant uniquement la colonne explosée."""
     if column_name in df.columns and not df.empty:
-        # S'assure que la colonne est du type objet pour la division
-        df[column_name] = df[column_name].astype(str) 
+        # 1. Sélectionne la série et prépare l'explosion
+        # Crée une copie de la série pour éviter les SettingWithCopyWarning
+        s = df[column_name].copy().astype(str).str.split(";")
         
-        # Le rename est crucial car la colonne créée par assign/split est temporaire
-        exploded_df = (
-            df.assign(temp_col=df[column_name].str.split(";"))
-            .explode("temp_col")
-            .rename(columns={"temp_col": column_name})
-        )
-        # Nettoie les lignes où la valeur est NaN ou 'nan' (résultat de la conversion en str)
-        return exploded_df.dropna(subset=[column_name])
+        # 2. Explose la série
+        exploded_s = s.explode()
+        
+        # 3. Convertit la série explosée en DataFrame, en s'assurant que la colonne existe.
+        exploded_df = exploded_s.to_frame(name=column_name)
+        
+        # 4. Nettoyage : Retire les NaN et les chaînes "nan"
+        exploded_df = exploded_df.dropna(subset=[column_name])
+        exploded_df = exploded_df[exploded_df[column_name].str.strip() != 'nan']
+        
+        return exploded_df.reset_index(drop=True)
+        
     return pd.DataFrame() # Retourne un DataFrame vide s'il n'y a pas de colonne ou de données.
 
 # --- Chargement des données ---
@@ -111,6 +116,7 @@ df_temp = df.copy()
 
 # Fonction générique pour construire les listes de filtres de manière stable
 def safe_filter_list(df_source, col_name, exploded=False):
+    # La vérification initiale est pour l'existence dans le DataFrame source.
     if col_name not in df_source.columns or df_source.empty:
         return ["Toutes"]
     
@@ -119,20 +125,22 @@ def safe_filter_list(df_source, col_name, exploded=False):
     else:
         df_work = df_source.copy()
 
+    # VÉRIFICATION CRITIQUE: S'assurer que la colonne existe dans le DataFrame de travail après l'explosion.
     if col_name in df_work.columns and not df_work.empty:
         # Utilise des méthodes Python pures sur une liste pour une robustesse maximale
-        # S'assure de convertir en chaîne, enlève l'espace, filtre les vides et 'nan'
+        # Cette ligne (qui causait l'erreur) est maintenant sûre car explode_column garantit un DF propre.
         raw_list = df_work[col_name].astype(str).unique().tolist()
         
         valid_list = []
         for s in raw_list:
             stripped = s.strip()
-            # Ajoute le filtre pour 'nan' qui peut provenir de la conversion de np.nan en str
+            # Ajoute le filtre pour 'nan' et les chaînes vides
             if stripped and stripped != 'nan':
                 valid_list.append(stripped)
         
         return ["Toutes"] + sorted(list(set(valid_list)))
     
+    # Retourne ["Toutes"] si la colonne n'existe pas ou si le DataFrame est vide après l'explosion/nettoyage
     return ["Toutes"]
 
 # 1. Distributeurs
@@ -280,7 +288,6 @@ with col_droite:
         df_exposed = explode_column(df_filtered, col_name)
         
         if not df_exposed.empty and col_name in df_exposed.columns:
-            # Nettoie les valeurs potentiellement vides
             exposure_counts = df_exposed[col_name].value_counts()
             
             if not exposure_counts.empty:
