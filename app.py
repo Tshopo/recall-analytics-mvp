@@ -108,7 +108,7 @@ if marque != "Toutes" and "nom_marque_du_produit" in df_filtered.columns:
     df_filtered = df_filtered[df_filtered["nom_marque_du_produit"] == marque]
 
 if "date_publication" in df_filtered.columns:
-    # CORRECTION DU TYPE ERROR: Utiliser pd.Timestamp.now(tz='UTC') pour un objet timezone-aware (UTC)
+    # Correction du Type Error
     now = pd.Timestamp.now(tz='UTC') 
     
     if periode == "12 derniers mois":
@@ -135,7 +135,12 @@ if "date_publication" in df_filtered.columns:
     st.plotly_chart(fig, use_container_width=True)
 
 if "nom_marque_du_produit" in df_filtered.columns and not df_filtered["nom_marque_du_produit"].dropna().empty:
-    top_marques = df_filtered["nom_marque_du_produit"].value_counts().reset_index().rename(columns={"index": "marque", "nom_marque_du_produit": "rappels"})
+    # CORRECTION DU VALUE ERROR: Renommage correct pour Plotly
+    # La colonne des valeurs est 'nom_marque_du_produit', la colonne de comptage est 'count'.
+    top_marques = df_filtered["nom_marque_du_produit"].value_counts().reset_index().rename(columns={
+        "nom_marque_du_produit": "marque", 
+        "count": "rappels"
+    })
     top_marques = top_marques.head(10)
     fig2 = px.bar(top_marques, x="marque", y="rappels", title="🏷️ Top 10 des marques les plus rappelées")
     st.plotly_chart(fig2, use_container_width=True)
