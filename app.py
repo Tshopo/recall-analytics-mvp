@@ -12,13 +12,15 @@ Bienvenue sur **Recall Analytics**, un tableau de bord interactif qui analyse le
 Ce prototype utilise la **nouvelle API publique officielle** (v2.1) de [data.economie.gouv.fr](https://data.economie.gouv.fr).
 """)
 
-# --- Fonction de chargement depuis l’API officielle ODS v2.1 ---
+# --- Fonction de chargement depuis l’API officielle ---
 @st.cache_data(ttl=3600)
 def load_data(limit=10000):
+    # Correction du paramètre order_by (nom de champ exact)
     api_url = (
         f"https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/"
-        f"rappelconso-v2-gtin-espaces/records?limit={limit}&order_by=date_publication%20DESC"
+        f"rappelconso-v2-gtin-espaces/records?limit={limit}&order_by=date_de_publication DESC"
     )
+
     try:
         r = requests.get(api_url, timeout=30)
         r.raise_for_status()
@@ -30,9 +32,9 @@ def load_data(limit=10000):
 
         df = pd.json_normalize(records)
 
-        # Colonnes utiles
+        # Colonnes utiles (selon la structure actuelle de rappelconso-v2-gtin-espaces)
         cols = [
-            "reference_fiche", "date_publication", "nom_du_produit",
+            "reference_fiche", "date_de_publication", "nom_du_produit",
             "nom_marque_du_produit", "categorie_de_produit",
             "motif_du_rappel", "distributeurs",
             "liens_vers_la_fiche_rappel", "zone_geographique_de_vente"
@@ -40,8 +42,11 @@ def load_data(limit=10000):
         df = df[[c for c in cols if c in df.columns]]
 
         # Conversion des dates
-        if "date_publication" in df.columns:
-            df["date_publication"] = pd.to_datetime(df["date_publication"], errors="coerce")
+        if "date_de_publication" in df.columns:
+            df["date_de_publication"] = pd.to_datetime(df["date_de_publication"], errors="coerce")
+
+        # Harmonisation pour le reste du code
+        df.rename(columns={"date_de_publication": "date_publication"}, inplace=True)
 
         return df
 
