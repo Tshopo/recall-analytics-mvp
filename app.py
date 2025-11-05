@@ -12,15 +12,13 @@ Bienvenue sur **Recall Analytics**, un tableau de bord interactif qui analyse le
 Ce prototype utilise la **nouvelle API publique officielle** (v2.1) de [data.economie.gouv.fr](https://data.economie.gouv.fr).
 """)
 
-# --- Fonction de chargement depuis l’API officielle ---
+# --- Fonction de chargement depuis l’API ---
 @st.cache_data(ttl=3600)
 def load_data(limit=10000):
-    # Correction du paramètre order_by (nom de champ exact)
     api_url = (
-        f"https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/"
-        f"rappelconso-v2-gtin-espaces/records?limit={limit}&order_by=date_de_publication DESC"
+        "https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/"
+        f"rappelconso-v2-gtin-espaces/records?limit={limit}&order_by=date_publication DESC"
     )
-
     try:
         r = requests.get(api_url, timeout=30)
         r.raise_for_status()
@@ -32,21 +30,18 @@ def load_data(limit=10000):
 
         df = pd.json_normalize(records)
 
-        # Colonnes utiles (selon la structure actuelle de rappelconso-v2-gtin-espaces)
+        # Colonnes utiles
         cols = [
-            "reference_fiche", "date_de_publication", "nom_du_produit",
+            "reference_fiche", "date_publication", "nom_du_produit",
             "nom_marque_du_produit", "categorie_de_produit",
             "motif_du_rappel", "distributeurs",
             "liens_vers_la_fiche_rappel", "zone_geographique_de_vente"
         ]
         df = df[[c for c in cols if c in df.columns]]
 
-        # Conversion des dates
-        if "date_de_publication" in df.columns:
-            df["date_de_publication"] = pd.to_datetime(df["date_de_publication"], errors="coerce")
-
-        # Harmonisation pour le reste du code
-        df.rename(columns={"date_de_publication": "date_publication"}, inplace=True)
+        # Conversion de la date
+        if "date_publication" in df.columns:
+            df["date_publication"] = pd.to_datetime(df["date_publication"], errors="coerce")
 
         return df
 
@@ -61,7 +56,7 @@ if df.empty:
     st.warning("⚠️ Impossible de charger les données depuis l’API RappelConso. Réessaie plus tard.")
     st.stop()
 
-# --- Filtres latéraux ---
+# --- Filtres ---
 st.sidebar.header("Filtres")
 categories = ["Toutes"] + sorted(df["categorie_de_produit"].dropna().unique().tolist()) if "categorie_de_produit" in df.columns else ["Toutes"]
 marques = ["Toutes"] + sorted(df["nom_marque_du_produit"].dropna().unique().tolist()) if "nom_marque_du_produit" in df.columns else ["Toutes"]
@@ -69,7 +64,6 @@ periode = st.sidebar.selectbox("Période", ["12 derniers mois", "6 derniers mois
 cat = st.sidebar.selectbox("Catégorie", categories)
 marque = st.sidebar.selectbox("Marque", marques)
 
-# --- Application des filtres ---
 df_filtered = df.copy()
 if cat != "Toutes" and "categorie_de_produit" in df_filtered.columns:
     df_filtered = df_filtered[df_filtered["categorie_de_produit"] == cat]
