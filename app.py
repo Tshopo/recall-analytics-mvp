@@ -12,22 +12,28 @@ Bienvenue sur **Recall Analytics**, un tableau de bord interactif qui analyse le
 Ce prototype utilise la **nouvelle API publique officielle** (v2.1) de [data.economie.gouv.fr](https://data.economie.gouv.fr).
 """)
 
-# --- Fonction de chargement depuis l’API (Requête minimale pour éviter le 400) ---
+# --- Fonction de chargement depuis l’API (Tente limit=100 en cas d'échec initial) ---
 @st.cache_data(ttl=3600)
-def load_data(limit=10000):
-    # URL de base du endpoint /records avec la limite seule
+def load_data(limit=10000): # Limite par défaut
+    # URL de base du endpoint /records
     base_url = (
         f"https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/"
         f"rappelconso-v2-gtin-espaces/records"
     )
     
-    # Paramètres de la requête: UNIQUEMENT la limite
+    # 1. Tentative avec le limit par défaut (10000)
     params = {"limit": limit}
 
     r = None
     try:
-        # Exécute la requête la plus simple
         r = requests.get(base_url, params=params, timeout=30)
+        
+        # 2. Si la première tentative échoue avec 400, tente une limite plus faible (100)
+        if r.status_code == 400:
+            st.warning(f"La requête avec limit={limit} a échoué (400). Tentative avec limit=100 pour vérifier la disponibilité.")
+            params_safe = {"limit": 100}
+            r = requests.get(base_url, params=params_safe, timeout=30)
+            
         r.raise_for_status()
         
         data = r.json()
@@ -53,7 +59,7 @@ def load_data(limit=10000):
         
         df = df.rename(columns=column_mapping)
 
-        # Sélection des colonnes nécessaires
+        # Sélection des colonnes nécessaires (doivent exister après le renommage)
         cols_finales = [
             "reference_fiche", "date_publication", "nom_du_produit",
             "nom_marque_du_produit", "categorie_de_produit",
@@ -88,7 +94,6 @@ if df.empty:
 
 # --- Filtres ---
 st.sidebar.header("Filtres")
-# Utilise les colonnes renommées
 categories = ["Toutes"] + sorted(df["categorie_de_produit"].dropna().unique().tolist()) if "categorie_de_produit" in df.columns else ["Toutes"]
 marques = ["Toutes"] + sorted(df["nom_marque_du_produit"].dropna().unique().tolist()) if "nom_marque_du_produit" in df.columns else ["Toutes"]
 periode = st.sidebar.selectbox("Période", ["12 derniers mois", "6 derniers mois", "3 derniers mois", "Toute la période"])
@@ -135,7 +140,6 @@ if "nom_marque_du_produit" in df_filtered.columns and not df_filtered["nom_marqu
 # --- Tableau ---
 st.write("### 🔍 Détail des rappels filtrés")
 display_cols = [c for c in ["reference_fiche", "date_publication", "categorie_de_produit", "nom_marque_du_produit", "motif_du_rappel", "liens_vers_la_fiche_rappel"] if c in df_filtered.columns]
-# Tri local des données filtrées
 st.dataframe(df_filtered[display_cols].sort_values(by="date_publication", ascending=False).reset_index(drop=True))
 
 csv = df_filtered[display_cols].to_csv(index=False)
