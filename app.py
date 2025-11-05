@@ -21,22 +21,29 @@ def load_data(limit=10000):
         f"rappelconso-v2-gtin-espaces/records"
     )
 
-    # Utilisation d'un dictionnaire de paramètres pour tous les arguments de requête.
-    # On réintroduit le tri descendant, car il est nécessaire, mais on laisse 'requests' l'encoder.
+    # Définition des champs à sélectionner
+    fields_to_select = ", ".join([
+        "reference_fiche", "date_publication", "nom_du_produit",
+        "nom_marque_du_produit", "categorie_de_produit",
+        "motif_du_rappel", "distributeurs",
+        "liens_vers_la_fiche_rappel", "zone_geographique_de_vente"
+    ])
+    
+    # Paramètres ODSQL à passer à requests.get()
     params = {
         "limit": limit,
-        # Tri descendant (-), syntaxe standard d'ODSQL
-        "order_by": "-date_publication" 
+        "order_by": "-date_publication",  # Tri descendant standard en ODSQL
+        "select": fields_to_select       # Sélection explicite des champs (critique pour ODS v2.1)
     }
 
     try:
-        # La requête utilise le dictionnaire 'params' pour construire l'URL complète
+        # Tente la requête complète
         r = requests.get(base_url, params=params, timeout=30)
         
-        # Le serveur OpenDataSoft v2.1 a besoin d'une syntaxe précise pour 'order_by'
-        # Si la première requête échoue, on tente une version sans tri pour isoler le problème.
+        # En cas d'échec initial (400), tente une requête simplifiée sans tri
         if r.status_code == 400:
-            params_safe = {"limit": limit}
+            st.warning(f"Tentative de tri échouée. Requête de secours sans 'order_by' lancée.")
+            params_safe = {"limit": limit, "select": fields_to_select}
             r = requests.get(base_url, params=params_safe, timeout=30)
             
         r.raise_for_status()
@@ -49,7 +56,8 @@ def load_data(limit=10000):
 
         df = pd.json_normalize(records)
 
-        # Sélection et nettoyage des colonnes
+        # Les colonnes sont déjà filtrées par la clause SELECT de l'API.
+        # On ne garde que celles qui existent dans le DataFrame normalisé.
         cols = [
             "reference_fiche", "date_publication", "nom_du_produit",
             "nom_marque_du_produit", "categorie_de_produit",
@@ -64,7 +72,7 @@ def load_data(limit=10000):
         return df
 
     except Exception as e:
-        # Affiche l'URL qui a causé l'erreur pour un meilleur débogage
+        # Affiche l'URL qui a causé l'erreur
         st.error(f"❌ Erreur lors du chargement des données depuis l’API ({r.status_code} - {r.reason}) : {r.url}")
         st.error(f"Message d'erreur complet : {e}")
         return pd.DataFrame()
