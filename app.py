@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
-import requests
+# On n'a plus besoin de requests ni de datetime pour cette version
 import plotly.express as px
-from datetime import datetime
+import os # Ajout pour vérifier l'existence du fichier
 
 st.set_page_config(page_title="Recall Analytics (RappelConso) - B2B MVP", layout="wide")
 st.title("🚀 Recall Analytics — Dashboard d'Intelligence Marché (MVP B2B)")
@@ -12,71 +12,45 @@ st.markdown("""
 **Objectif :** Fournir des insights actionnables sur la fréquence, la gravité et l'exposition géographique des rappels.
 """)
 
-# --- FONCTION DE CHARGEMENT DE DONNÉES (Robuste contre l'API 400) ---
+# --- FONCTION DE CHARGEMENT DE DONNÉES (MODIFIÉE POUR LE CSV) ---
 @st.cache_data(ttl=3600)
-def load_data(limit=10000):
-    """Charge les données de RappelConso avec un mécanisme de secours en cas de 400."""
-    base_url = (
-        f"https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/"
-        f"rappelconso-v2-gtin-espaces/records"
-    )
+def load_data_from_csv(file_path="rappelconso_export.csv"):
+    """Charge les données à partir d'un fichier CSV local (celui que vous avez téléchargé)."""
     
-    params = {"limit": limit}
-    r = None
+    if not os.path.exists(file_path):
+        st.error(f"❌ Fichier non trouvé : '{file_path}'. Veuillez vous assurer que le fichier CSV téléchargé est placé dans le même dossier que l'application et porte ce nom.")
+        return pd.DataFrame()
+    
     try:
-        r = requests.get(base_url, params=params, timeout=30)
+        # Tente de lire le fichier
+        df = pd.read_csv(file_path, sep=",") 
+
+        # Nettoyage et préparation des colonnes (similaire à la version API)
         
-        if r.status_code == 400:
-            st.warning(f"La requête avec limit={limit} a échoué (400). Tentative avec limit=100 pour vérifier la disponibilité.")
-            params_safe = {"limit": 100}
-            r = requests.get(base_url, params=params_safe, timeout=30)
-            
-        r.raise_for_status()
-        
-        data = r.json()
-        records = data.get("results", [])
-        if not records:
-            st.warning("⚠️ Aucun enregistrement trouvé dans l'API RappelConso.")
-            return pd.DataFrame()
-
-        df = pd.json_normalize(records)
-
-        # Mapping des noms de champs réels de l'API vers les noms Streamlit/B2B
-        column_mapping = {
-            "numero_fiche": "reference_fiche",
-            "libelle": "nom_du_produit",
-            "marque_produit": "nom_marque_du_produit",
-            "categorie_produit": "categorie_de_produit",
-            "motif_rappel": "motif_du_rappel",
-            "risques_encourus": "risques_encourus",
-            "lien_vers_la_fiche_rappel": "liens_vers_la_fiche_rappel",
-            "date_publication": "date_publication",
-            "distributeurs": "distributeurs",
-            "zone_geographique_de_vente": "zone_geographique_de_vente"
-        }
-        
-        df = df.rename(columns=column_mapping)
-
-        cols_finales = list(column_mapping.values())
-        df = df[[c for c in cols_finales if c in df.columns]]
-
+        # 1. Conversion de la date
         if "date_publication" in df.columns:
+            # S'assure de l'utiliser au format ISO 8601 pour éviter les erreurs de conversion
             df["date_publication"] = pd.to_datetime(df["date_publication"], errors="coerce", utc=True)
             df = df.sort_values(by="date_publication", ascending=False) 
 
-        # Nettoyage des chaînes de caractères dans les colonnes multi-valeurs
-        for col in ["distributeurs", "zone_geographique_de_vente", "risques_encourus"]:
+        # 2. Nettoyage des colonnes multi-valeurs
+        for col in ["distributeurs", "zone_geographique_de_vente", "risques_encourus", "motif_du_rappel", "categorie_de_produit", "nom_marque_du_produit"]:
             if col in df.columns:
-                 # Normalise les séparateurs et s'assure que c'est une chaîne
-                df[col] = df[col].astype(str).str.lower().str.replace("|", ";", regex=False).str.replace(", ", ";", regex=False).str.strip()
+                # Normalise, convertit en minuscule et remplace les séparateurs courants par des points-virgules
+                df[col] = (df[col].astype(str)
+                                 .str.lower()
+                                 .str.replace("|", ";", regex=False)
+                                 .str.replace(", ", ";", regex=False)
+                                 .str.strip()
+                                 .replace('nan', '', regex=False) # Remplace la chaîne 'nan' par vide
+                                 .replace('', pd.NA) # Remplace la chaîne vide par NaN pour le nettoyage futur
+                )
 
+        st.success(f"✅ {len(df)} enregistrements chargés depuis {file_path}.")
         return df
 
     except Exception as e:
-        error_url = r.url if r is not None else base_url
-        error_status = r.status_code if r is not None else "N/A"
-        st.error(f"❌ Erreur lors du chargement des données depuis l’API ({error_status}) : {error_url}")
-        st.error(f"Message d'erreur complet : {e}")
+        st.error(f"❌ Erreur lors de la lecture du fichier CSV : {e}")
         return pd.DataFrame()
 
 
@@ -96,22 +70,14 @@ def explode_column(df, column_name):
         
         # 4. Nettoyage : Retire les NaN, les chaînes vides et les chaînes "nan"
         exploded_df = exploded_df.dropna(subset=[column_name])
-        exploded_df = exploded_df[exploded_df[column_name].str.strip() != 'nan']
+        # Note: on ré-applique le strip ici, car l'explosion peut introduire des espaces si le séparateur était ' ;'
+        exploded_df[column_name] = exploded_df[column_name].str.strip()
+        exploded_df = exploded_df[exploded_df[column_name] != 'nan']
+        exploded_df = exploded_df[exploded_df[column_name] != '']
         
         return exploded_df.reset_index(drop=True)
         
-    return pd.DataFrame() # Retourne un DataFrame vide s'il n'y a pas de colonne ou de données.
-
-# --- Chargement des données ---
-df = load_data()
-
-if df.empty:
-    st.warning("⚠️ Impossible de charger les données depuis l’API RappelConso. Réessaie plus tard.")
-    st.stop()
-
-# --- FILTRES B2B EN SIDEBAR ---
-st.sidebar.header("Filtres d'Intelligence Marché")
-df_temp = df.copy()
+    return pd.DataFrame() 
 
 # Fonction générique pour construire les listes de filtres de manière stable
 def safe_filter_list(df_source, col_name, exploded=False):
@@ -124,19 +90,31 @@ def safe_filter_list(df_source, col_name, exploded=False):
         df_work = df_source.copy()
 
     if col_name in df_work.columns and not df_work.empty:
-        # Utilisation défensive pour obtenir la liste des valeurs uniques
-        raw_list = df_work[col_name].astype(str).unique().tolist()
+        # Récupère la liste, enlève les valeurs non définies ou vides
+        raw_list = df_work[col_name].dropna().astype(str).unique().tolist()
         
         valid_list = []
         for s in raw_list:
             stripped = s.strip()
-            # Filtre les chaînes vides et 'nan'
             if stripped and stripped != 'nan':
                 valid_list.append(stripped)
         
         return ["Toutes"] + sorted(list(set(valid_list)))
     
     return ["Toutes"]
+
+# --- Chargement des données (Appel principal) ---
+df = load_data_from_csv()
+
+if df.empty:
+    st.warning("⚠️ L'application ne peut pas démarrer sans données. Vérifiez votre fichier CSV.")
+    st.stop()
+
+# --- RESTE DU SCRIPT (Identique et stable) ---
+
+# --- FILTRES B2B EN SIDEBAR ---
+st.sidebar.header("Filtres d'Intelligence Marché")
+df_temp = df.copy()
 
 # 1. Distributeurs
 distributeurs_list = safe_filter_list(df_temp, "distributeurs", exploded=True)
@@ -263,7 +241,6 @@ with col_gauche:
     st.subheader("Tendance Temporelle ⏳ : Volume mensuel de rappels")
     if "date_publication" in df_filtered.columns:
         df_month = df_filtered.groupby(df_filtered["date_publication"].dt.to_period("M")).size().reset_index(name="rappels")
-        # Vérifie si la série n'est pas vide avant de continuer
         if not df_month.empty:
             df_month["date_publication"] = df_month["date_publication"].dt.to_timestamp()
             fig_trend = px.line(df_month, x="date_publication", y="rappels", title="Évolution du volume de rappels par mois de publication")
