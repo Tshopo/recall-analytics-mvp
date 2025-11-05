@@ -12,7 +12,7 @@ Bienvenue sur **Recall Analytics**, un tableau de bord interactif qui analyse le
 Ce prototype utilise la **nouvelle API publique officielle** (v2.1) de [data.economie.gouv.fr](https://data.economie.gouv.fr).
 """)
 
-# --- Fonction de chargement depuis l’API (CORRIGÉE) ---
+# --- Fonction de chargement depuis l’API (CORRIGÉE avec les bons noms de champs) ---
 @st.cache_data(ttl=3600)
 def load_data(limit=10000):
     # URL de base du endpoint /records
@@ -21,22 +21,28 @@ def load_data(limit=10000):
         f"rappelconso-v2-gtin-espaces/records"
     )
 
-    # Définition des champs à sélectionner SANS ESPACE après les virgules (CORRECTION)
-    fields_to_select = ",".join([
-        "reference_fiche", "date_publication", "nom_du_produit",
-        "nom_marque_du_produit", "categorie_de_produit",
-        "motif_du_rappel", "distributeurs",
-        "liens_vers_la_fiche_rappel", "zone_geographique_de_vente"
-    ])
+    # Noms de champs CORRIGÉS selon l'API et joints SANS ESPACE après la virgule
+    api_fields = [
+        "numero_fiche",             # Remplace reference_fiche
+        "date_publication",
+        "libelle",                  # Remplace nom_du_produit
+        "marque_produit",           # Remplace nom_marque_du_produit
+        "categorie_produit",        # Remplace categorie_de_produit
+        "motif_rappel",             # Remplace motif_du_rappel
+        "distributeurs",
+        "lien_vers_la_fiche_rappel", # Remplace liens_vers_la_fiche_rappel
+        "zone_geographique_de_vente"
+    ]
+    fields_to_select = ",".join(api_fields)
     
     # Paramètres ODSQL à passer à requests.get()
     params = {
         "limit": limit,
-        "order_by": "-date_publication",  # Tentative de tri
-        "select": fields_to_select       # Sélection de champs compacte
+        "order_by": "-date_publication",
+        "select": fields_to_select
     }
 
-    r = None # Initialiser r pour la portée du try/except
+    r = None
     try:
         # Tente la requête complète (avec tri)
         r = requests.get(base_url, params=params, timeout=30)
@@ -57,14 +63,24 @@ def load_data(limit=10000):
 
         df = pd.json_normalize(records)
 
-        # Les colonnes sont déjà filtrées par la clause SELECT de l'API.
-        cols = [
+        # Renommage des colonnes pour correspondre au code existant du tableau de bord
+        df = df.rename(columns={
+            "numero_fiche": "reference_fiche",
+            "libelle": "nom_du_produit",
+            "marque_produit": "nom_marque_du_produit",
+            "categorie_produit": "categorie_de_produit",
+            "motif_rappel": "motif_du_rappel",
+            "lien_vers_la_fiche_rappel": "liens_vers_la_fiche_rappel"
+        })
+
+        # Colonnes finales du DataFrame
+        cols_finales = [
             "reference_fiche", "date_publication", "nom_du_produit",
             "nom_marque_du_produit", "categorie_de_produit",
             "motif_du_rappel", "distributeurs",
             "liens_vers_la_fiche_rappel", "zone_geographique_de_vente"
         ]
-        df = df[[c for c in cols if c in df.columns]]
+        df = df[[c for c in cols_finales if c in df.columns]]
 
         if "date_publication" in df.columns:
             df["date_publication"] = pd.to_datetime(df["date_publication"], errors="coerce")
@@ -73,7 +89,7 @@ def load_data(limit=10000):
 
     except Exception as e:
         # Affiche l'URL qui a causé l'erreur
-        error_url = r.url if r is not None else "URL non déterminée"
+        error_url = r.url if r is not None else base_url
         error_status = r.status_code if r is not None else "N/A"
         error_reason = r.reason if r is not None else "N/A"
         st.error(f"❌ Erreur lors du chargement des données depuis l’API ({error_status} - {error_reason}) : {error_url}")
