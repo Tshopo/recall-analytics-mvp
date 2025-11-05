@@ -21,8 +21,8 @@ def load_data(limit=10000):
         f"rappelconso-v2-gtin-espaces/records"
     )
 
-    # Définition des champs à sélectionner
-    fields_to_select = ", ".join([
+    # Définition des champs à sélectionner SANS ESPACE après les virgules (CORRECTION)
+    fields_to_select = ",".join([
         "reference_fiche", "date_publication", "nom_du_produit",
         "nom_marque_du_produit", "categorie_de_produit",
         "motif_du_rappel", "distributeurs",
@@ -32,17 +32,18 @@ def load_data(limit=10000):
     # Paramètres ODSQL à passer à requests.get()
     params = {
         "limit": limit,
-        "order_by": "-date_publication",  # Tri descendant standard en ODSQL
-        "select": fields_to_select       # Sélection explicite des champs (critique pour ODS v2.1)
+        "order_by": "-date_publication",  # Tentative de tri
+        "select": fields_to_select       # Sélection de champs compacte
     }
 
+    r = None # Initialiser r pour la portée du try/except
     try:
-        # Tente la requête complète
+        # Tente la requête complète (avec tri)
         r = requests.get(base_url, params=params, timeout=30)
         
         # En cas d'échec initial (400), tente une requête simplifiée sans tri
         if r.status_code == 400:
-            st.warning(f"Tentative de tri échouée. Requête de secours sans 'order_by' lancée.")
+            st.warning(f"Tentative de tri échouée ou syntaxe rejetée. Requête de secours sans 'order_by' lancée.")
             params_safe = {"limit": limit, "select": fields_to_select}
             r = requests.get(base_url, params=params_safe, timeout=30)
             
@@ -57,7 +58,6 @@ def load_data(limit=10000):
         df = pd.json_normalize(records)
 
         # Les colonnes sont déjà filtrées par la clause SELECT de l'API.
-        # On ne garde que celles qui existent dans le DataFrame normalisé.
         cols = [
             "reference_fiche", "date_publication", "nom_du_produit",
             "nom_marque_du_produit", "categorie_de_produit",
@@ -73,7 +73,10 @@ def load_data(limit=10000):
 
     except Exception as e:
         # Affiche l'URL qui a causé l'erreur
-        st.error(f"❌ Erreur lors du chargement des données depuis l’API ({r.status_code} - {r.reason}) : {r.url}")
+        error_url = r.url if r is not None else "URL non déterminée"
+        error_status = r.status_code if r is not None else "N/A"
+        error_reason = r.reason if r is not None else "N/A"
+        st.error(f"❌ Erreur lors du chargement des données depuis l’API ({error_status} - {error_reason}) : {error_url}")
         st.error(f"Message d'erreur complet : {e}")
         return pd.DataFrame()
 
