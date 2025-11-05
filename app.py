@@ -91,7 +91,7 @@ def explode_column(df, column_name):
             .dropna(subset=[column_name])
             .reset_index(drop=True)
         )
-    # Retourne un DataFrame vide SANS colonne si elle manque.
+    # Retourne un DataFrame vide
     return pd.DataFrame()
 
 # --- Chargement des données ---
@@ -105,17 +105,15 @@ if df.empty:
 st.sidebar.header("Filtres d'Intelligence Marché")
 df_temp = df.copy()
 
-# 1. Distributeurs (Explode needed - Correction finale de l'AttributeError)
+# 1. Distributeurs (Explode needed - Correction de l'AttributeError)
 distrib_col_name = "distributeurs"
 distributeurs_list = ["Toutes"] # Initialisation sûre
 
 if distrib_col_name in df_temp.columns:
     df_exploded_distrib = explode_column(df_temp, distrib_col_name)
 
-    # VÉRIFICATION ROBUSTE : S'assurer que la colonne existe dans le résultat EXPLODED
+    # VÉRIFICATION FINALE ROBUSTE : Vérifie si la colonne existe DANS le DataFrame explosé.
     if distrib_col_name in df_exploded_distrib.columns and not df_exploded_distrib.empty:
-        # LIGNE CRUCIALE CORRIGÉE : S'assurer du typage string avant les opérations .str,
-        # puis filtrer les valeurs vides.
         valid_distrib = (
             df_exploded_distrib[distrib_col_name]
             .astype(str)
@@ -191,8 +189,12 @@ col2.metric("Marques Impactées", df_filtered["nom_marque_du_produit"].nunique()
 df_risques_exploded = explode_column(df_filtered, "risques_encourus")
 # Défense contre l'absence de colonnes après explode
 if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.columns:
-    risque_major = df_risques_exploded["risques_encourus"].value_counts().index.get(0)
-    col3.metric("Risque Principal", risque_major.title())
+    # Vérifie si la série n'est pas vide avant de prendre l'index[0]
+    if not df_risques_exploded["risques_encourus"].value_counts().empty:
+        risque_major = df_risques_exploded["risques_encourus"].value_counts().index.get(0)
+        col3.metric("Risque Principal", risque_major.title())
+    else:
+        col3.metric("Risque Principal", "N/A")
 else:
     col3.metric("Risque Principal", "N/A")
 
@@ -232,13 +234,16 @@ with col_left:
 with col_right:
     st.subheader("Analyse de Risque 💀 : Top 5 des Risques Encourus")
     if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.columns:
-        top_risques = df_risques_exploded["risques_encourus"].value_counts().reset_index().rename(columns={
-            "risques_encourus": "Risque", 
-            "count": "Nombre_de_Rappels"
-        }).head(5)
-        fig_risques = px.bar(top_risques, x="Nombre_de_Rappels", y="Risque", orientation='h', title="Fréquence des principaux dangers (Listeria, E. Coli, Inertes...)")
-        fig_risques.update_layout(yaxis={'categoryorder':'total ascending'})
-        st.plotly_chart(fig_risques, use_container_width=True)
+        if not df_risques_exploded["risques_encourus"].value_counts().empty:
+            top_risques = df_risques_exploded["risques_encourus"].value_counts().reset_index().rename(columns={
+                "risques_encourus": "Risque", 
+                "count": "Nombre_de_Rappels"
+            }).head(5)
+            fig_risques = px.bar(top_risques, x="Nombre_de_Rappels", y="Risque", orientation='h', title="Fréquence des principaux dangers (Listeria, E. Coli, Inertes...)")
+            fig_risques.update_layout(yaxis={'categoryorder':'total ascending'})
+            st.plotly_chart(fig_risques, use_container_width=True)
+        else:
+             st.info("Aucun risque identifiable dans les données filtrées.")
     else:
         st.info("Aucun risque identifié ou données de risque manquantes.")
 
@@ -276,14 +281,17 @@ with col_droite:
         df_exposed = df_exposed[~df_exposed[col_name].isin(['nan', ''])]
         
         if not df_exposed.empty and col_name in df_exposed.columns:
-            top_exposure = df_exposed[col_name].value_counts().reset_index().rename(columns={
-                col_name: "Cible", 
-                "count": "Nombre_de_Rappels"
-            }).head(10)
-            
-            fig_exposure = px.bar(top_exposure, y="Cible", x="Nombre_de_Rappels", orientation='h', title=title_text)
-            fig_exposure.update_layout(yaxis={'categoryorder':'total ascending'})
-            st.plotly_chart(fig_exposure, use_container_width=True)
+            if not df_exposed[col_name].value_counts().empty:
+                top_exposure = df_exposed[col_name].value_counts().reset_index().rename(columns={
+                    col_name: "Cible", 
+                    "count": "Nombre_de_Rappels"
+                }).head(10)
+                
+                fig_exposure = px.bar(top_exposure, y="Cible", x="Nombre_de_Rappels", orientation='h', title=title_text)
+                fig_exposure.update_layout(yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig_exposure, use_container_width=True)
+            else:
+                 st.info(f"Aucune donnée de {target_kpi} dans les filtres sélectionnés.")
         else:
             st.info(f"Aucune donnée de {target_kpi} dans les filtres sélectionnés.")
     else:
