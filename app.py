@@ -21,11 +21,11 @@ def load_data(limit=10000):
         f"rappelconso-v2-gtin-espaces/records"
     )
 
-    # Utilisation d'un dictionnaire de paramètres pour laisser 'requests' gérer l'encodage
-    # Utilisation de 'DESC' pour le tri descendant, plus robuste que le signe moins seul
+    # Utilisation du dictionnaire 'params' avec le tiret pour le tri descendant,
+    # qui devrait être correctement encodé par la librairie requests.
     params = {
         "limit": limit,
-        "order_by": "date_publication DESC"
+        "order_by": "-date_publication" 
     }
 
     try:
