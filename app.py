@@ -1,35 +1,34 @@
-
 import streamlit as st
 import pandas as pd
 import requests
 import plotly.express as px
 from datetime import datetime
 
-st.set_page_config(page_title="Recall Analytics (RappelConso)", layout="wide")
-st.title("📊 Recall Analytics — Rappels produits en France")
+st.set_page_config(page_title="Recall Analytics (RappelConso) - B2B MVP", layout="wide")
+st.title("🚀 Recall Analytics — Dashboard d'Intelligence Marché (MVP B2B)")
 
 st.markdown("""
-Bienvenue sur **Recall Analytics**, un tableau de bord interactif qui analyse les rappels de produits publiés sur [RappelConso.gouv.fr](https://rappel.conso.gouv.fr).  
-Ce prototype utilise la **nouvelle API publique officielle** (v2.1) de [data.economie.gouv.fr](https://data.economie.gouv.fr).
+**Prototype de plateforme SaaS B2B** exploitant les données de RappelConso pour l'analyse des risques et le benchmarking concurrentiel. 
+**Objectif :** Fournir des insights actionnables sur la fréquence, la gravité et l'exposition géographique des rappels.
 """)
 
-# --- Fonction de chargement depuis l’API (Tente limit=100 en cas d'échec initial) ---
+# --- FONCTION DE CHARGEMENT DE DONNÉES (CORRIGÉE ET ENRICHIE) ---
 @st.cache_data(ttl=3600)
-def load_data(limit=10000): # Limite par défaut
-    # URL de base du endpoint /records
+def load_data(limit=10000):
+    """Charge les données de RappelConso avec un mécanisme de secours en cas de 400."""
     base_url = (
         f"https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/"
         f"rappelconso-v2-gtin-espaces/records"
     )
     
-    # 1. Tentative avec le limit par défaut (10000)
+    # Tentative 1 (limit par défaut)
     params = {"limit": limit}
 
     r = None
     try:
         r = requests.get(base_url, params=params, timeout=30)
         
-        # 2. Si la première tentative échoue avec 400, tente une limite plus faible (100)
+        # Tentative 2 (limit réduite en cas d'échec 400 sur la première requête)
         if r.status_code == 400:
             st.warning(f"La requête avec limit={limit} a échoué (400). Tentative avec limit=100 pour vérifier la disponibilité.")
             params_safe = {"limit": 100}
@@ -45,13 +44,14 @@ def load_data(limit=10000): # Limite par défaut
 
         df = pd.json_normalize(records)
 
-        # Mapping des noms de champs réels de l'API vers les noms utilisés dans le code Streamlit
+        # Mapping des noms de champs réels de l'API vers les noms Streamlit/B2B
         column_mapping = {
             "numero_fiche": "reference_fiche",
             "libelle": "nom_du_produit",
             "marque_produit": "nom_marque_du_produit",
             "categorie_produit": "categorie_de_produit",
             "motif_rappel": "motif_du_rappel",
+            "risques_encourus": "risques_encourus", # NOUVEAU
             "lien_vers_la_fiche_rappel": "liens_vers_la_fiche_rappel",
             "date_publication": "date_publication",
             "distributeurs": "distributeurs",
@@ -60,32 +60,42 @@ def load_data(limit=10000): # Limite par défaut
         
         df = df.rename(columns=column_mapping)
 
-        # Sélection des colonnes nécessaires
-        cols_finales = [
-            "reference_fiche", "date_publication", "nom_du_produit",
-            "nom_marque_du_produit", "categorie_de_produit",
-            "motif_du_rappel", "distributeurs",
-            "liens_vers_la_fiche_rappel", "zone_geographique_de_vente"
-        ]
+        cols_finales = list(column_mapping.values())
         df = df[[c for c in cols_finales if c in df.columns]]
 
         if "date_publication" in df.columns:
-            # Conversion en datetime UTC-aware
             df["date_publication"] = pd.to_datetime(df["date_publication"], errors="coerce", utc=True)
-            # Tri local car le tri API a été supprimé
             df = df.sort_values(by="date_publication", ascending=False) 
+
+        # Nettoyage des chaînes de caractères dans les colonnes multi-valeurs
+        for col in ["distributeurs", "zone_geographique_de_vente", "risques_encourus"]:
+            if col in df.columns:
+                 # Normalise les séparateurs (pipe | et virgule ,) en un seul
+                df[col] = df[col].astype(str).str.lower().str.replace("|", ";", regex=False).str.replace(", ", ";", regex=False).str.strip()
 
         return df
 
     except Exception as e:
-        # Affiche l'URL qui a causé l'erreur
         error_url = r.url if r is not None else base_url
         error_status = r.status_code if r is not None else "N/A"
-        error_reason = r.reason if r is not None else "N/A"
-        st.error(f"❌ Erreur lors du chargement des données depuis l’API ({error_status} - {error_reason}) : {error_url}")
+        st.error(f"❌ Erreur lors du chargement des données depuis l’API ({error_status}) : {error_url}")
         st.error(f"Message d'erreur complet : {e}")
         return pd.DataFrame()
 
+
+# --- FONCTION UTILITAIRE POUR L'ANALYSE MULTI-VALEUR ---
+def explode_column(df, column_name):
+    """Divise une colonne de chaînes de caractères séparées par des points-virgules (;) en lignes distinctes."""
+    if column_name in df.columns:
+        # Remplace '; ' ou '|' par ';' puis 'explose'
+        return (
+            df.assign(temp_col=df[column_name].str.split(";"))
+            .explode("temp_col")
+            .rename(columns={"temp_col": column_name})
+            .dropna(subset=[column_name])
+            .reset_index(drop=True)
+        )
+    return df
 
 # --- Chargement des données ---
 df = load_data()
@@ -94,24 +104,29 @@ if df.empty:
     st.warning("⚠️ Impossible de charger les données depuis l’API RappelConso. Réessaie plus tard.")
     st.stop()
 
-# --- Filtres ---
-st.sidebar.header("Filtres")
-categories = ["Toutes"] + sorted(df["categorie_de_produit"].dropna().unique().tolist()) if "categorie_de_produit" in df.columns else ["Toutes"]
-marques = ["Toutes"] + sorted(df["nom_marque_du_produit"].dropna().unique().tolist()) if "nom_marque_du_produit" in df.columns else ["Toutes"]
-periode = st.sidebar.selectbox("Période", ["12 derniers mois", "6 derniers mois", "3 derniers mois", "Toute la période"])
-cat = st.sidebar.selectbox("Catégorie", categories)
-marque = st.sidebar.selectbox("Marque", marques)
+# --- FILTRES B2B EN SIDEBAR ---
+st.sidebar.header("Filtres d'Intelligence Marché")
+df_temp = df.copy()
 
+# Extraction des listes uniques pour les nouveaux filtres
+distributeurs_list = ["Toutes"] + sorted(explode_column(df_temp, "distributeurs")["distributeurs"].unique().tolist())
+motifs_list = ["Toutes"] + sorted(df_temp["motif_du_rappel"].dropna().unique().tolist())
+categories = ["Toutes"] + sorted(df_temp["categorie_de_produit"].dropna().unique().tolist())
+marques = ["Toutes"] + sorted(df_temp["nom_marque_du_produit"].dropna().unique().tolist())
+
+# Widgets de filtres
+periode = st.sidebar.selectbox("Période d'Analyse", ["12 derniers mois", "6 derniers mois", "3 derniers mois", "Toute la période"])
+cat = st.sidebar.selectbox("Catégorie de Produit", categories)
+marque = st.sidebar.selectbox("Marque (Benchmarking)", marques)
+distrib = st.sidebar.selectbox("Distributeur (Analyse du Canal)", distributeurs_list)
+motif = st.sidebar.selectbox("Motif de Rappel", motifs_list)
+
+
+# --- APPLICATION DES FILTRES ---
 df_filtered = df.copy()
-if cat != "Toutes" and "categorie_de_produit" in df_filtered.columns:
-    df_filtered = df_filtered[df_filtered["categorie_de_produit"] == cat]
-if marque != "Toutes" and "nom_marque_du_produit" in df_filtered.columns:
-    df_filtered = df_filtered[df_filtered["nom_marque_du_produit"] == marque]
 
 if "date_publication" in df_filtered.columns:
-    # Correction du Type Error
     now = pd.Timestamp.now(tz='UTC') 
-    
     if periode == "12 derniers mois":
         df_filtered = df_filtered[df_filtered["date_publication"] >= now - pd.DateOffset(months=12)]
     elif periode == "6 derniers mois":
@@ -119,40 +134,137 @@ if "date_publication" in df_filtered.columns:
     elif periode == "3 derniers mois":
         df_filtered = df_filtered[df_filtered["date_publication"] >= now - pd.DateOffset(months=3)]
 
-# --- Indicateurs clés ---
-col1, col2, col3 = st.columns(3)
-col1.metric("Rappels total (filtré)", len(df_filtered))
-if "date_publication" in df_filtered.columns and not df_filtered["date_publication"].isna().all():
-    col2.metric("Dernière publication", str(df_filtered["date_publication"].max().date()))
+if cat != "Toutes" and "categorie_de_produit" in df_filtered.columns:
+    df_filtered = df_filtered[df_filtered["categorie_de_produit"] == cat]
+if marque != "Toutes" and "nom_marque_du_produit" in df_filtered.columns:
+    df_filtered = df_filtered[df_filtered["nom_marque_du_produit"] == marque]
+if motif != "Toutes" and "motif_du_rappel" in df_filtered.columns:
+    df_filtered = df_filtered[df_filtered["motif_du_rappel"] == motif]
+
+# Filtre Distributeur (utilise la recherche de sous-chaîne car la colonne n'est pas "explosée" dans df_filtered)
+if distrib != "Toutes" and "distributeurs" in df_filtered.columns:
+    # Le filtre doit correspondre à une des sous-chaînes (ex: cherche 'aldi' dans 'aldi;carrefour')
+    df_filtered = df_filtered[df_filtered["distributeurs"].str.contains(distrib, case=False, na=False)]
+
+
+# --- INDICATEURS CLÉS STRATÉGIQUES ---
+total_rappels = len(df_filtered)
+total_marques = df_filtered["nom_marque_du_produit"].nunique() if "nom_marque_du_produit" in df_filtered.columns else 0
+total_risques = df_filtered["risques_encourus"].nunique() if "risques_encourus" in df_filtered.columns else 0
+
+st.header("1. Aperçu Stratégique")
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Total Rappels (Filtré)", total_rappels)
+col2.metric("Marques Impactées", total_marques)
+
+# Analyse du Risque le plus Fréquent
+df_risques_exploded = explode_column(df_filtered, "risques_encourus")
+risque_major = df_risques_exploded["risques_encourus"].value_counts().idxmax() if not df_risques_exploded.empty else "N/A"
+col3.metric("Risque Principal", risque_major)
+
+# Taux de Microbien vs Inert (un KPI clé)
+if "motif_du_rappel" in df_filtered.columns:
+    microbien_count = df_filtered[df_filtered["motif_du_rappel"].str.contains("microbiologique|salmonelle|listeria|ecoli", case=False, na=False)].shape[0]
+    inert_count = df_filtered[df_filtered["motif_du_rappel"].str.contains("verre|métal|plastique|inertes", case=False, na=False)].shape[0]
+    taux_microbien = f"{(microbien_count / total_rappels * 100):.1f}%" if total_rappels > 0 else "0%"
 else:
-    col2.metric("Dernière publication", "N/A")
-col3.metric("Catégories", df_filtered["categorie_de_produit"].nunique() if "categorie_de_produit" in df_filtered.columns else "N/A")
+    taux_microbien = "N/A"
+col4.metric("Taux de Risque Microbiologique", taux_microbien)
 
-# --- Graphiques ---
-if "date_publication" in df_filtered.columns:
-    df_month = df_filtered.groupby(df_filtered["date_publication"].dt.to_period("M")).size().reset_index(name="rappels")
-    df_month["date_publication"] = df_month["date_publication"].dt.to_timestamp()
-    fig = px.bar(df_month, x="date_publication", y="rappels", title="📈 Évolution mensuelle des rappels")
-    st.plotly_chart(fig, use_container_width=True)
+st.markdown("---")
 
-if "nom_marque_du_produit" in df_filtered.columns and not df_filtered["nom_marque_du_produit"].dropna().empty:
-    # CORRECTION DU VALUE ERROR: Renommage correct pour Plotly
-    # La colonne des valeurs est 'nom_marque_du_produit', la colonne de comptage est 'count'.
-    top_marques = df_filtered["nom_marque_du_produit"].value_counts().reset_index().rename(columns={
-        "nom_marque_du_produit": "marque", 
-        "count": "rappels"
-    })
-    top_marques = top_marques.head(10)
-    fig2 = px.bar(top_marques, x="marque", y="rappels", title="🏷️ Top 10 des marques les plus rappelées")
-    st.plotly_chart(fig2, use_container_width=True)
+# --- GRAPHIQUES B2B D'INTELLIGENCE MARCHÉ ---
 
-# --- Tableau ---
-st.write("### 🔍 Détail des rappels filtrés")
-display_cols = [c for c in ["reference_fiche", "date_publication", "categorie_de_produit", "nom_marque_du_produit", "motif_du_rappel", "liens_vers_la_fiche_rappel"] if c in df_filtered.columns]
-st.dataframe(df_filtered[display_cols].sort_values(by="date_publication", ascending=False).reset_index(drop=True))
+st.header("2. Benchmarking et Analyse des Causes")
+
+col_left, col_right = st.columns(2)
+
+# Graphique 1: Part de Marché du Rappel (Benchmarking Concurrentiel)
+with col_left:
+    st.subheader("Benchmark 🎯 : Part de Rappel par Marque (SoR - Share of Recall)")
+    if "nom_marque_du_produit" in df_filtered.columns and total_rappels > 0:
+        top_marques = df_filtered["nom_marque_du_produit"].value_counts(normalize=True).mul(100).reset_index().rename(columns={
+            "nom_marque_du_produit": "Marque", 
+            "proportion": "Part_de_Rappel_pourcent"
+        })
+        top_marques = top_marques.head(10)
+        fig_sor = px.pie(top_marques, values="Part_de_Rappel_pourcent", names="Marque", title="Distribution des rappels (%) sur le périmètre filtré")
+        fig_sor.update_traces(textinfo='percent+label')
+        st.plotly_chart(fig_sor, use_container_width=True)
+    else:
+        st.info("Filtrez les données pour effectuer le benchmarking.")
+
+
+# Graphique 2: Top 5 des Risques Encourus (Analyse de Gravité)
+with col_right:
+    st.subheader("Analyse de Risque 💀 : Top 5 des Risques Encourus")
+    if not df_risques_exploded.empty:
+        top_risques = df_risques_exploded["risques_encourus"].value_counts().reset_index().rename(columns={
+            "risques_encourus": "Risque", 
+            "count": "Nombre_de_Rappels"
+        }).head(5)
+        fig_risques = px.bar(top_risques, x="Nombre_de_Rappels", y="Risque", orientation='h', title="Fréquence des principaux dangers (Listeria, E. Coli, Inertes...)")
+        fig_risques.update_layout(yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig_risques, use_container_width=True)
+    else:
+        st.info("Aucun risque identifié dans les données filtrées.")
+
+st.markdown("---")
+
+# --- GRAPHIQUES D'EXPOSITION (TEMPorel & Géographique/Canal) ---
+
+st.header("3. Tendance et Exposition")
+col_gauche, col_droite = st.columns(2)
+
+# Graphique 3: Tendance Temporelle (Cycle de Vie du Rappel)
+with col_gauche:
+    st.subheader("Tendance Temporelle ⏳ : Volume mensuel de rappels")
+    if "date_publication" in df_filtered.columns:
+        df_month = df_filtered.groupby(df_filtered["date_publication"].dt.to_period("M")).size().reset_index(name="rappels")
+        df_month["date_publication"] = df_month["date_publication"].dt.to_timestamp()
+        fig_trend = px.line(df_month, x="date_publication", y="rappels", title="Évolution du volume de rappels par mois de publication")
+        st.plotly_chart(fig_trend, use_container_width=True)
+    else:
+        st.info("Données de publication manquantes.")
+
+# Graphique 4: Top 10 Distributeurs ou Régions (Analyse de l'Exposition)
+with col_droite:
+    st.subheader("Exposition 📍 : Canaux de Distribution / Régions les plus impactés")
+    
+    # Choix entre Distributeur et Région
+    target_kpi = st.radio("Afficher le Top 10 par :", ("Distributeur", "Région"), key="target_kpi", horizontal=True)
+    
+    col_name = "distributeurs" if target_kpi == "Distributeur" else "zone_geographique_de_vente"
+    title_text = "Top 10 Distributeurs par Nombre de Rappels" if target_kpi == "Distributeur" else "Top 10 Zones Géographiques de Vente par Rappel"
+
+    if col_name in df_filtered.columns:
+        # Explode pour un comptage précis
+        df_exposed = explode_column(df_filtered, col_name)
+        
+        top_exposure = df_exposed[col_name].value_counts().reset_index().rename(columns={
+            col_name: "Cible", 
+            "count": "Nombre_de_Rappels"
+        }).head(10)
+        
+        fig_exposure = px.bar(top_exposure, y="Cible", x="Nombre_de_Rappels", orientation='h', title=title_text)
+        fig_exposure.update_layout(yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig_exposure, use_container_width=True)
+    else:
+        st.info(f"Colonne {col_name} manquante dans les données.")
+
+st.markdown("---")
+
+# --- TABLEAU DE DONNÉES DÉTAILLÉ (Data Export) ---
+st.header("4. Registre Détaillé des Rappels")
+st.write("### 🔍 Détail des Rappels Filtrés (pour export et analyse des fiches)")
+display_cols = [c for c in ["reference_fiche", "date_publication", "categorie_de_produit", "nom_marque_du_produit", "motif_du_rappel", "risques_encourus", "distributeurs", "zone_geographique_de_vente", "liens_vers_la_fiche_rappel"] if c in df_filtered.columns]
+st.dataframe(df_filtered[display_cols].sort_values(by="date_publication", ascending=False).reset_index(drop=True), use_container_width=True)
 
 csv = df_filtered[display_cols].to_csv(index=False)
-st.download_button(label="💾 Télécharger (CSV)", data=csv, file_name="rappels_filtres.csv", mime="text/csv")
+st.download_button(label="💾 Télécharger les Données Filtrées (CSV)", data=csv, file_name="recall_analytics_export.csv", mime="text/csv")
 
 st.markdown("---")
 st.caption("Prototype Recall Analytics — Données publiques © RappelConso.gouv.fr / Ministère de l'Économie")
+
+
+nnées publiques © RappelConso.gouv.fr / Ministère de l'Économie")
