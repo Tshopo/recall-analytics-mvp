@@ -12,14 +12,14 @@ Bienvenue sur **Recall Analytics**, un tableau de bord interactif qui analyse le
 Ce prototype utilise la **nouvelle API publique officielle** (v2.1) de [data.economie.gouv.fr](https://data.economie.gouv.fr).
 """)
 
-# --- Fonction de chargement depuis l’API ---
+# --- Fonction de chargement depuis l’API (CORRIGÉE) ---
 @st.cache_data(ttl=3600)
 def load_data(limit=10000):
-    # L'URL est simplifiée pour ne conserver que la limite.
-    # Le tri est supprimé pour éviter l'erreur 400.
+    # AJOUT de '&select=*' pour satisfaire les exigences minimales de l'API v2.1 ODSQL.
+    # L'URL finale demandée est : .../records?limit=10000&select=*
     api_url = (
         f"https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/"
-        f"rappelconso-v2-gtin-espaces/records?limit={limit}" 
+        f"rappelconso-v2-gtin-espaces/records?limit={limit}&select=*" 
     )
 
     try:
@@ -33,13 +33,14 @@ def load_data(limit=10000):
 
         df = pd.json_normalize(records)
 
-        # Sélection et nettoyage
+        # Sélection et nettoyage des colonnes
         cols = [
             "reference_fiche", "date_publication", "nom_du_produit",
             "nom_marque_du_produit", "categorie_de_produit",
             "motif_du_rappel", "distributeurs",
             "liens_vers_la_fiche_rappel", "zone_geographique_de_vente"
         ]
+        # Assurez-vous que les colonnes existent avant de les sélectionner
         df = df[[c for c in cols if c in df.columns]]
 
         if "date_publication" in df.columns:
@@ -107,7 +108,6 @@ if "nom_marque_du_produit" in df_filtered.columns and not df_filtered["nom_marqu
 # --- Tableau ---
 st.write("### 🔍 Détail des rappels filtrés")
 display_cols = [c for c in ["reference_fiche", "date_publication", "categorie_de_produit", "nom_marque_du_produit", "motif_du_rappel", "liens_vers_la_fiche_rappel"] if c in df_filtered.columns]
-# Le tri est maintenu ici pour l'affichage du tableau
 st.dataframe(df_filtered[display_cols].sort_values(by="date_publication", ascending=False).reset_index(drop=True))
 
 csv = df_filtered[display_cols].to_csv(index=False)
