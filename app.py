@@ -9,13 +9,16 @@ st.title("📊 Recall Analytics — Rappels produits en France")
 
 st.markdown("""
 Bienvenue sur **Recall Analytics**, un tableau de bord interactif qui analyse les rappels de produits publiés sur [RappelConso.gouv.fr](https://rappel.conso.gouv.fr).  
-Ce prototype s'appuie sur la **nouvelle API publique officielle** (v2.1) et permet d'explorer les rappels par **catégorie**, **marque** et **période**.
+Ce prototype utilise la **nouvelle API publique officielle** (v2.1) de [data.economie.gouv.fr](https://data.economie.gouv.fr).
 """)
 
-# --- Fonction de chargement depuis la nouvelle API RappelConso v2.1 ---
+# --- Fonction de chargement depuis l’API officielle ODS v2.1 ---
 @st.cache_data(ttl=3600)
 def load_data(limit=10000):
-    api_url = f"https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/rappelconso-v2-gtin-espaces/records?limit={limit}"
+    api_url = (
+        f"https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/"
+        f"rappelconso-v2-gtin-espaces/records?limit={limit}&order_by=date_publication%20DESC"
+    )
     try:
         r = requests.get(api_url, timeout=30)
         r.raise_for_status()
@@ -27,28 +30,30 @@ def load_data(limit=10000):
 
         df = pd.json_normalize(records)
 
-        # On garde les colonnes utiles
+        # Colonnes utiles
         cols = [
-            "reference_fiche", "date_publication", "nom_marque_du_produit",
-            "categorie_de_produit", "nom_du_produit", "motif_du_rappel",
-            "distributeurs", "liens_vers_la_fiche_rappel", "zone_geographique_de_vente"
+            "reference_fiche", "date_publication", "nom_du_produit",
+            "nom_marque_du_produit", "categorie_de_produit",
+            "motif_du_rappel", "distributeurs",
+            "liens_vers_la_fiche_rappel", "zone_geographique_de_vente"
         ]
         df = df[[c for c in cols if c in df.columns]]
 
-        # Conversion de la date
+        # Conversion des dates
         if "date_publication" in df.columns:
             df["date_publication"] = pd.to_datetime(df["date_publication"], errors="coerce")
 
         return df
+
     except Exception as e:
-        st.error(f"❌ Erreur lors du chargement des données depuis l’API ({e})")
+        st.error(f"❌ Erreur lors du chargement des données depuis l’API : {e}")
         return pd.DataFrame()
 
 # --- Chargement des données ---
 df = load_data()
 
 if df.empty:
-    st.warning("⚠️ Impossible de charger les données depuis l’API RappelConso pour le moment. Réessaie plus tard.")
+    st.warning("⚠️ Impossible de charger les données depuis l’API RappelConso. Réessaie plus tard.")
     st.stop()
 
 # --- Filtres latéraux ---
