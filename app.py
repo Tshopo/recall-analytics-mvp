@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import requests
@@ -12,7 +13,7 @@ Bienvenue sur **Recall Analytics**, un tableau de bord interactif qui analyse le
 Ce prototype utilise la **nouvelle API publique officielle** (v2.1) de [data.economie.gouv.fr](https://data.economie.gouv.fr).
 """)
 
-# --- Fonction de chargement depuis l’API (Requête minimale avec mécanisme de secours) ---
+# --- Fonction de chargement depuis l’API (Tente limit=100 en cas d'échec initial) ---
 @st.cache_data(ttl=3600)
 def load_data(limit=10000): # Limite par défaut
     # URL de base du endpoint /records
@@ -71,7 +72,7 @@ def load_data(limit=10000): # Limite par défaut
         if "date_publication" in df.columns:
             # Conversion en datetime UTC-aware
             df["date_publication"] = pd.to_datetime(df["date_publication"], errors="coerce", utc=True)
-            # Tri local
+            # Tri local car le tri API a été supprimé
             df = df.sort_values(by="date_publication", ascending=False) 
 
         return df
@@ -135,7 +136,8 @@ if "date_publication" in df_filtered.columns:
     st.plotly_chart(fig, use_container_width=True)
 
 if "nom_marque_du_produit" in df_filtered.columns and not df_filtered["nom_marque_du_produit"].dropna().empty:
-    # Correction du Value Error
+    # CORRECTION DU VALUE ERROR: Renommage correct pour Plotly
+    # La colonne des valeurs est 'nom_marque_du_produit', la colonne de comptage est 'count'.
     top_marques = df_filtered["nom_marque_du_produit"].value_counts().reset_index().rename(columns={
         "nom_marque_du_produit": "marque", 
         "count": "rappels"
@@ -154,4 +156,3 @@ st.download_button(label="💾 Télécharger (CSV)", data=csv, file_name="rappel
 
 st.markdown("---")
 st.caption("Prototype Recall Analytics — Données publiques © RappelConso.gouv.fr / Ministère de l'Économie")
-
