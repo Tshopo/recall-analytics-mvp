@@ -12,25 +12,18 @@ Bienvenue sur **Recall Analytics**, un tableau de bord interactif qui analyse le
 Ce prototype utilise la **nouvelle API publique officielle** (v2.1) de [data.economie.gouv.fr](https://data.economie.gouv.fr).
 """)
 
-# --- Fonction de chargement depuis l’API (CORRIGÉE) ---
+# --- Fonction de chargement depuis l’API ---
 @st.cache_data(ttl=3600)
 def load_data(limit=10000):
-    # Base URL sans les paramètres de requête
-    base_url = (
+    # L'URL est simplifiée pour ne conserver que la limite.
+    # Le tri est supprimé pour éviter l'erreur 400.
+    api_url = (
         f"https://data.economie.gouv.fr/api/explore/v2.1/catalog/datasets/"
-        f"rappelconso-v2-gtin-espaces/records"
+        f"rappelconso-v2-gtin-espaces/records?limit={limit}" 
     )
 
-    # Utilisation du dictionnaire 'params' avec le tiret pour le tri descendant,
-    # qui devrait être correctement encodé par la librairie requests.
-    params = {
-        "limit": limit,
-        "order_by": "-date_publication" 
-    }
-
     try:
-        # La requête utilise le dictionnaire 'params'
-        r = requests.get(base_url, params=params, timeout=30)
+        r = requests.get(api_url, timeout=30)
         r.raise_for_status()
         data = r.json()
         records = data.get("results", [])
@@ -114,6 +107,7 @@ if "nom_marque_du_produit" in df_filtered.columns and not df_filtered["nom_marqu
 # --- Tableau ---
 st.write("### 🔍 Détail des rappels filtrés")
 display_cols = [c for c in ["reference_fiche", "date_publication", "categorie_de_produit", "nom_marque_du_produit", "motif_du_rappel", "liens_vers_la_fiche_rappel"] if c in df_filtered.columns]
+# Le tri est maintenu ici pour l'affichage du tableau
 st.dataframe(df_filtered[display_cols].sort_values(by="date_publication", ascending=False).reset_index(drop=True))
 
 csv = df_filtered[display_cols].to_csv(index=False)
