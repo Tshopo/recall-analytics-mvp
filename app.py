@@ -67,7 +67,7 @@ def load_data(limit=10000):
         # Nettoyage des chaînes de caractères dans les colonnes multi-valeurs
         for col in ["distributeurs", "zone_geographique_de_vente", "risques_encourus"]:
             if col in df.columns:
-                 # Normalise les séparateurs
+                 # Normalise les séparateurs et s'assure que c'est une chaîne
                 df[col] = df[col].astype(str).str.lower().str.replace("|", ";", regex=False).str.replace(", ", ";", regex=False).str.strip()
 
         return df
@@ -91,7 +91,8 @@ def explode_column(df, column_name):
             .dropna(subset=[column_name])
             .reset_index(drop=True)
         )
-    return df
+    # Retourne un DataFrame vide si la colonne n'existe pas ou un DataFrame avec la colonne si elle existe
+    return pd.DataFrame(columns=df.columns) if column_name not in df.columns else df
 
 # --- Chargement des données ---
 df = load_data()
@@ -100,18 +101,29 @@ if df.empty:
     st.warning("⚠️ Impossible de charger les données depuis l’API RappelConso. Réessaie plus tard.")
     st.stop()
 
-# --- FILTRES B2B EN SIDEBAR (LOGIQUE DÉFENSIVE APPLIQUÉE ICI) ---
+# --- FILTRES B2B EN SIDEBAR (LOGIQUE DÉFENSIVE CORRIGÉE) ---
 st.sidebar.header("Filtres d'Intelligence Marché")
 df_temp = df.copy()
 
-# 1. Distributeurs (Explode needed)
+# 1. Distributeurs (Explode needed - Correction de l'AttributeError)
 df_exploded_distrib = explode_column(df_temp, "distributeurs")
-if "distributeurs" in df_exploded_distrib.columns:
-    # Filtrer les valeurs vides ou 'nan'
-    valid_distrib = df_exploded_distrib[df_exploded_distrib["distributeurs"].str.strip().str.len() > 0]["distributeurs"].unique().tolist()
+distrib_col_name = "distributeurs"
+
+if distrib_col_name in df_exploded_distrib.columns:
+    # LIGNE CRUCIALE CORRIGÉE : Assure le typage string avant les opérations .str
+    valid_distrib = (
+        df_exploded_distrib[distrib_col_name]
+        .astype(str)
+        .str.strip()
+        .replace('', pd.NA, regex=False) # Remplace les chaînes vides par NA
+        .dropna()
+        .unique()
+        .tolist()
+    )
     distributeurs_list = ["Toutes"] + sorted(valid_distrib)
 else:
     distributeurs_list = ["Toutes"]
+
 
 # 2. Motifs (Simple column)
 if "motif_du_rappel" in df_temp.columns:
@@ -173,8 +185,12 @@ col2.metric("Marques Impactées", df_filtered["nom_marque_du_produit"].nunique()
 
 # Analyse du Risque le plus Fréquent
 df_risques_exploded = explode_column(df_filtered, "risques_encourus")
-risque_major = df_risques_exploded["risques_encourus"].value_counts().index.get(0) if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.columns else "N/A"
-col3.metric("Risque Principal", risque_major.title())
+# Défense contre l'absence de colonnes après explode
+if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.columns:
+    risque_major = df_risques_exploded["risques_encourus"].value_counts().index.get(0)
+    col3.metric("Risque Principal", risque_major.title())
+else:
+    col3.metric("Risque Principal", "N/A")
 
 # Taux de Risque Microbiologique
 if "motif_du_rappel" in df_filtered.columns:
@@ -255,7 +271,7 @@ with col_droite:
         # Filtre les entrées non valides
         df_exposed = df_exposed[~df_exposed[col_name].isin(['nan', ''])]
         
-        if not df_exposed.empty:
+        if not df_exposed.empty and col_name in df_exposed.columns:
             top_exposure = df_exposed[col_name].value_counts().reset_index().rename(columns={
                 col_name: "Cible", 
                 "count": "Nombre_de_Rappels"
