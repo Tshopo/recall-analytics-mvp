@@ -80,22 +80,21 @@ def load_data(limit=10000):
         return pd.DataFrame()
 
 
-# --- FONCTION UTILITAIRE POUR L'ANALYSE MULTI-VALEUR (CORRIGÉE) ---
+# --- FONCTION UTILITAIRE POUR L'ANALYSE MULTI-VALEUR ---
 def explode_column(df, column_name):
     """Divise une colonne de chaînes de caractères séparées par des points-virgules (;) en lignes distinctes. 
        Retourne un DataFrame propre contenant uniquement la colonne explosée."""
     if column_name in df.columns and not df.empty:
         # 1. Sélectionne la série et prépare l'explosion
-        # Crée une copie de la série pour éviter les SettingWithCopyWarning
         s = df[column_name].copy().astype(str).str.split(";")
         
-        # 2. Explose la série
+        # 2. Explode la série
         exploded_s = s.explode()
         
-        # 3. Convertit la série explosée en DataFrame, en s'assurant que la colonne existe.
+        # 3. Convertit la série explosée en DataFrame
         exploded_df = exploded_s.to_frame(name=column_name)
         
-        # 4. Nettoyage : Retire les NaN et les chaînes "nan"
+        # 4. Nettoyage : Retire les NaN, les chaînes vides et les chaînes "nan"
         exploded_df = exploded_df.dropna(subset=[column_name])
         exploded_df = exploded_df[exploded_df[column_name].str.strip() != 'nan']
         
@@ -110,13 +109,12 @@ if df.empty:
     st.warning("⚠️ Impossible de charger les données depuis l’API RappelConso. Réessaie plus tard.")
     st.stop()
 
-# --- FILTRES B2B EN SIDEBAR (LOGIQUE DÉFENSIVE MISE À JOUR) ---
+# --- FILTRES B2B EN SIDEBAR ---
 st.sidebar.header("Filtres d'Intelligence Marché")
 df_temp = df.copy()
 
 # Fonction générique pour construire les listes de filtres de manière stable
 def safe_filter_list(df_source, col_name, exploded=False):
-    # La vérification initiale est pour l'existence dans le DataFrame source.
     if col_name not in df_source.columns or df_source.empty:
         return ["Toutes"]
     
@@ -125,22 +123,19 @@ def safe_filter_list(df_source, col_name, exploded=False):
     else:
         df_work = df_source.copy()
 
-    # VÉRIFICATION CRITIQUE: S'assurer que la colonne existe dans le DataFrame de travail après l'explosion.
     if col_name in df_work.columns and not df_work.empty:
-        # Utilise des méthodes Python pures sur une liste pour une robustesse maximale
-        # Cette ligne (qui causait l'erreur) est maintenant sûre car explode_column garantit un DF propre.
+        # Utilisation défensive pour obtenir la liste des valeurs uniques
         raw_list = df_work[col_name].astype(str).unique().tolist()
         
         valid_list = []
         for s in raw_list:
             stripped = s.strip()
-            # Ajoute le filtre pour 'nan' et les chaînes vides
+            # Filtre les chaînes vides et 'nan'
             if stripped and stripped != 'nan':
                 valid_list.append(stripped)
         
         return ["Toutes"] + sorted(list(set(valid_list)))
     
-    # Retourne ["Toutes"] si la colonne n'existe pas ou si le DataFrame est vide après l'explosion/nettoyage
     return ["Toutes"]
 
 # 1. Distributeurs
@@ -184,7 +179,6 @@ if motif != "Toutes" and "motif_du_rappel" in df_filtered.columns:
 
 # Filtre Distributeur
 if distrib != "Toutes" and "distributeurs" in df_filtered.columns:
-    # Utilise str.contains sur la colonne multi-valeurs de df_filtered
     df_filtered = df_filtered[df_filtered["distributeurs"].str.contains(distrib, case=False, na=False)]
 
 
@@ -269,9 +263,13 @@ with col_gauche:
     st.subheader("Tendance Temporelle ⏳ : Volume mensuel de rappels")
     if "date_publication" in df_filtered.columns:
         df_month = df_filtered.groupby(df_filtered["date_publication"].dt.to_period("M")).size().reset_index(name="rappels")
-        df_month["date_publication"] = df_month["date_publication"].dt.to_timestamp()
-        fig_trend = px.line(df_month, x="date_publication", y="rappels", title="Évolution du volume de rappels par mois de publication")
-        st.plotly_chart(fig_trend, use_container_width=True)
+        # Vérifie si la série n'est pas vide avant de continuer
+        if not df_month.empty:
+            df_month["date_publication"] = df_month["date_publication"].dt.to_timestamp()
+            fig_trend = px.line(df_month, x="date_publication", y="rappels", title="Évolution du volume de rappels par mois de publication")
+            st.plotly_chart(fig_trend, use_container_width=True)
+        else:
+            st.info("Aucune donnée pour générer la tendance temporelle.")
     else:
         st.info("Données de publication manquantes.")
 
