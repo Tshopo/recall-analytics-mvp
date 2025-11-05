@@ -10,32 +10,38 @@ st.title("📊 Recall Analytics — Rappels produits (MVP)")
 
 API_URL = "https://rappel.conso.gouv.fr/api/records/1.0/search/?dataset=rappelconso&q=&rows=1000"
 
-@st.cache_data(ttl=60*60)  # cache 1 heure
+@st.cache_data(ttl=60*60)
 def load_data():
-    r = requests.get(API_URL, timeout=30)
-    r.raise_for_status()
-    records = r.json().get("records", [])
-    if not records:
+    try:
+        # Lien API public RappelConso
+        API_URL = "https://data.economie.gouv.fr/api/records/1.0/search/"
+        params = {
+            "dataset": "rappelconso",
+            "rows": 1000,
+            "sort": "-date_publication"
+        }
+        r = requests.get(API_URL, params=params, timeout=30)
+        if r.status_code != 200:
+            st.warning(f"⚠️ L'API RappelConso a renvoyé le code {r.status_code}. Réessaye plus tard.")
+            return pd.DataFrame()
+        records = r.json().get("records", [])
+        if not records:
+            st.warning("Aucune donnée disponible pour l'instant.")
+            return pd.DataFrame()
+        df = pd.json_normalize([rec.get("fields", {}) for rec in records])
+        cols = [
+            "numero_fiche", "date_publication", "categorie_produit",
+            "sous_categorie_produit", "marque_produit", "enseigne_distributeur",
+            "motif_rappel", "nature_juridique_rappel", "lien_vers_la_fiche_rappel"
+        ]
+        df = df[[c for c in cols if c in df.columns]]
+        if "date_publication" in df.columns:
+            df["date_publication"] = pd.to_datetime(df["date_publication"], errors="coerce")
+        return df
+    except Exception as e:
+        st.error(f"❌ Erreur lors du chargement des données : {e}")
         return pd.DataFrame()
-    df = pd.json_normalize([rec.get("fields", {}) for rec in records])
-    # Quelques colonnes utiles (si présentes)
-    cols = [
-        "numero_fiche", "date_publication", "categorie_produit",
-        "sous_categorie_produit", "marque_produit", "enseigne_distributeur",
-        "motif_rappel", "nature_juridique_rappel", "lien_vers_la_fiche_rappel"
-    ]
-    # Garde les colonnes qui existent
-    df = df[[c for c in cols if c in df.columns]]
-    # Nettoyage des dates
-    if "date_publication" in df.columns:
-        df["date_publication"] = pd.to_datetime(df["date_publication"], errors="coerce")
-    return df
 
-df = load_data()
-
-if df.empty:
-    st.warning("Aucune donnée trouvée pour l'instant. Réessaie dans quelques minutes.")
-    st.stop()
 
 # Sidebar - filtres
 st.sidebar.header("Filtres")
