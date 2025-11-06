@@ -5,6 +5,10 @@ import os
 from datetime import datetime
 import numpy as np
 from collections import defaultdict
+# Import pour la cartographie
+import json 
+import plotly.graph_objects as go
+
 
 # --- 0. SIMULATION DES COUTS STRATEGIQUES (EN DUR) ---
 # Ces valeurs sont des estimations de coûts internes simulées pour la stratégie.
@@ -14,14 +18,31 @@ COUT_LOGISTIQUE_JOUR_SUPP = 500.0      # Coût logistique / jour pour chaque dis
 SEUIL_IMR_ALERTE = 10.0                # Seuil à partir duquel un IMR est considéré critique
 risques_graves_keywords = "listeriose|salmonellose|e\.coli|blessures|allergene non declare|corps étranger" # Rendu global pour les fonctions
 
+# Simulation des données géospatiales pour la France (simplifié pour l'exemple)
+# Nous utiliserons les départements comme proxy des 'zones de vente' pour la visualisation.
+DEPARTEMENTS_FRANCE = {
+    '75': 'paris', '13': 'bouches-du-rhone', '69': 'rhone', '59': 'nord', '33': 'gironde',
+    '31': 'haute-garonne', '44': 'loire-atlantique', '67': 'bas-rhin', '974': 'la reunion',
+    '78': 'yvelines', '92': 'hauts-de-seine', '62': 'pas-de-calais', '06': 'alpes-maritimes',
+    '34': 'herault'
+}
+
+# Charger un GeoJSON simple pour la France (nécessite un fichier choropleth_france.json dans l'environnement)
+# Pour une simulation locale sans GeoJSON, nous allons simuler les codes de département dans les zones géographiques
+def load_geojson():
+    # En environnement local, il faudrait charger un fichier GeoJSON comme celui-ci :
+    # if os.path.exists("choropleth_france.json"):
+    #     with open("choropleth_france.json", "r") as f:
+    #         return json.load(f)
+    # Pour l'environnement Cloud/Streamlit sans fichier externe, on retourne None et on gère l'affichage en info.
+    return None
+
 # --- 1. CONFIGURATION ET MISE EN PAGE GLOBALE ---
-# ATTENTION: Correction de l'erreur st.set_page_page_config -> st.set_page_config
 st.set_page_config(page_title="Recall Analytics (RappelConso) - B2B PRO", layout="wide", initial_sidebar_state="expanded")
 st.title("🛡️ Recall Analytics — Dashboard d'Intelligence Marché (B2B PRO) - Vue Stratégie DS")
 
 st.markdown("""
-**Prototype de plateforme SaaS B2B** exploitant les données de RappelConso pour l'analyse des risques et le benchmarking concurrentiel. 
-**Focus DS :** Intégration des **Coûts Stratégiques Simulé** et des indicateurs prospectifs (IMR, Matrice de Risque Distributeur, DCR).
+**Focus DS :** Intégration des **Coûts Stratégiques Simulé**, **Indicateurs Denses** et **Analyse Géospatiale**.
 """)
 
 st.markdown("---")
@@ -56,6 +77,7 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
             "numero_fiche": "reference_fiche",
             "lien_vers_la_fiche_rappel": "liens_vers_la_fiche_rappel",
             "date_debut_commercialisation_produit": "date_debut_commercialisation",
+            "nom_fabricant_ou_marque": "nom_marque_du_produit" # Si la colonne nom_marque_du_produit n'est pas présente.
         }
         
         rename_dict = {old_name: new_name for old_name, new_name in column_mapping.items() if old_name in df.columns and old_name != new_name}
@@ -75,7 +97,7 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
         if "date_debut_commercialisation" in df.columns:
             df["date_debut_commercialisation"] = pd.to_datetime(df["date_debut_commercialisation"], errors="coerce", utc=True)
 
-        for col in ["distributeurs", "zone_geographique_de_vente", "risques_encourus", "motif_du_rappel", "categorie_de_produit", "nom_marque_du_produit"]:
+        for col in ["distributeurs", "zone_geographique_de_vente", "risques_encourus", "motif_du_rappel", "categorie_de_produit", "nom_marque_du_produit", "identifiant_de_l_etablissement_d_ou_provient_le_produit"]:
             if col in df.columns:
                 df[col] = (df[col].astype(str)
                                  .str.lower()
@@ -168,7 +190,6 @@ if distrib != "Toutes" and "distributeurs" in df_filtered.columns:
 total_rappels = len(df_filtered)
 df_risques_exploded = explode_column(df_filtered, "risques_encourus")
 
-
 # Risque principal
 risque_principal = "N/A"
 if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.columns:
@@ -189,37 +210,26 @@ if "date_debut_commercialisation" in df_filtered.columns and not df_filtered["da
             avg_days = df_temp_dates["duree_commercialisation"].mean()
             vitesse_reponse = f"{avg_days:.1f} jours"
     
-# --- NOUVEL INDICATEUR STRATEGIQUE : Indice de Maturité du Rappel (IMR) ---
+# --- IMR FUNCTION (Rappel) ---
 def calculate_imr(df_calc):
-    if df_calc.empty:
+    if df_calc.empty or 'risques_encourus' not in df_calc.columns:
         return 0.0, 0.0
 
     df_imr = df_calc.copy()
     
-    # FIX : S'assurer que 'is_risque_grave' est calculé si la colonne 'risques_encourus' est présente
-    if 'risques_encourus' in df_imr.columns:
-         df_imr["is_risque_grave"] = df_imr["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
-    else:
-        return 0.0, 0.0
-    
-    # 1. Calcul du Score de Gravité pour chaque rappel
+    # 1. Calcul de la gravité
+    df_imr["is_risque_grave"] = df_imr["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
     df_imr['score_gravite'] = np.where(df_imr['is_risque_grave'], 2, 1) # Risque grave = poids 2, mineur = poids 1
     
-    # 2. Calcul du nombre total de rappels (non uniques, pour la fréquence)
     total_rappels_period = len(df_imr)
-    
-    # 3. Calcul du coût implicite (pour l'affichage financier)
-    df_imr['cout_implicite'] = np.where(df_imr['is_risque_grave'], COUT_RAPPEl_GRAVE_UNITAIRE, COUT_RAPPEl_MINEUR_UNITAIRE)
-    
-    # 4. Calcul de l'IMR (pondéré)
     total_score = df_imr['score_gravite'].sum()
     
-    # Formule simplifiée pour IMR : Score Pondéré / Fréquence
     if total_rappels_period > 0:
         imr = (total_score / total_rappels_period) * 10 
     else:
         imr = 0.0
         
+    df_imr['cout_implicite'] = np.where(df_imr['is_risque_grave'], COUT_RAPPEl_GRAVE_UNITAIRE, COUT_RAPPEl_MINEUR_UNITAIRE)
     total_cout = df_imr['cout_implicite'].sum()
 
     return imr, total_cout
@@ -227,8 +237,8 @@ def calculate_imr(df_calc):
 # Calcul de l'IMR pour la marque filtrée
 imr_marque, cout_marque = calculate_imr(df_filtered)
 
-# Calcul du % Rappels graves (utilisation de la même logique sans appeler calculate_imr)
-if total_rappels > 0:
+# Calcul du % Rappels graves
+if total_rappels > 0 and 'risques_encourus' in df_filtered.columns:
     count_graves = df_filtered["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False).sum()
     pc_risques_graves = (count_graves / total_rappels * 100)
     pc_risques_graves_str = f"{pc_risques_graves:.1f}%"
@@ -236,8 +246,11 @@ else:
     pc_risques_graves_str = "N/A"
 
 # Calcul de l'IMR pour le marché (pour la comparaison)
-df_marche_comp = df[df["date_publication"] >= df_filtered["date_publication"].min()].copy()
-imr_marche_comp, _ = calculate_imr(df_marche_comp)
+if "date_publication" in df.columns:
+    df_marche_comp = df[df["date_publication"] >= df_filtered["date_publication"].min()].copy()
+    imr_marche_comp, _ = calculate_imr(df_marche_comp)
+else:
+    imr_marche_comp = 0.0
 
 
 # --- 5. STRUCTURE DU TABLEAU DE BORD PAR ACTEUR (TABS) ---
@@ -246,17 +259,39 @@ tab1, tab2, tab3 = st.tabs(["🏭 Fabricants & Marques", "🛒 Distributeurs & R
 
 
 # ----------------------------------------------------------------------
-# TAB 1: FABRICANTS & MARQUES (BENCHMARKING IMR)
+# TAB 1: FABRICANTS & MARQUES (BENCHMARKING IMR & RISQUE FOURNISSEUR)
 # ----------------------------------------------------------------------
 with tab1:
     st.header("🎯 Intelligence Concurrentielle & Maîtrise du Risque Fournisseur")
 
     # --- KPI FABRICANT ---
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     col1.metric("Total Rappels (Périmètre)", total_rappels)
-    col2.metric("Risque Principal", risque_principal)
-    col3.metric("IMR de la Marque (Simulé)", f"{imr_marque:.2f}", help="Indice de Maturité du Rappel : Score de gravité (2x Grave + 1x Mineur) pondéré. Seuil d'alerte : 10.0.")
-    col4.metric("Coût Implicite (Simulé)", f"{cout_marque:,.0f} €", help="Estimation du coût financier total des rappels (simulé en dur).")
+    col2.metric("IMR de la Marque", f"{imr_marque:.2f}")
+    col3.metric("IMR du Marché", f"{imr_marche_comp:.2f}")
+    col4.metric("Coût Implicite", f"{cout_marque:,.0f} €")
+    col5.metric("Risque Principal", risque_principal)
+    
+    # NOUVEAU KPI: Taux de Non-Conformité Fournisseur (NCF)
+    # Simulation: Si 'identifiant_de_l_etablissement_d_ou_provient_le_produit' est présent, on compte les fournisseurs.
+    if 'identifiant_de_l_etablissement_d_ou_provient_le_produit' in df_filtered.columns:
+        df_fournisseurs = explode_column(df_filtered, 'identifiant_de_l_etablissement_d_ou_provient_le_produit')
+        if not df_fournisseurs.empty:
+            total_fournisseurs_impactes = df_fournisseurs['identifiant_de_l_etablissement_d_ou_provient_le_produit'].nunique()
+        else:
+            total_fournisseurs_impactes = 0
+    else:
+        # Simulation d'un NCF si la colonne est manquante (e.g. 5% de fournisseurs de T1 posent problème)
+        total_fournisseurs_impactes = 0 
+
+    # Simulation d'une dépendance de 30 fournisseurs T1 au total
+    total_fournisseurs_t1 = 30 
+    if total_fournisseurs_t1 > 0 and 'identifiant_de_l_etablissement_d_ou_provient_le_produit' in df_filtered.columns:
+        taux_ncf = (total_fournisseurs_impactes / total_fournisseurs_t1) * 100
+        col6.metric("NCF T1 (Simulé)", f"{taux_ncf:.1f}%", help="Taux de Non-Conformité Fournisseur : % des fournisseurs T1 impliqués dans au moins 1 rappel.")
+    else:
+        col6.metric("NCF T1 (Simulé)", "N/A", help="Données d'identification fournisseur manquantes pour le calcul précis.")
+
 
     st.markdown("### Analyse de Positionnement et Causes Racines")
     col_gauche, col_droite = st.columns(2)
@@ -281,18 +316,15 @@ with tab1:
         st.subheader("2. Tendance : IMR de la Marque vs. Marché (Courbe de Contrôle)")
         if marque != "Toutes" and "date_publication" in df_filtered.columns:
             
-            # Calcul IMR mensuel pour la marque et le marché
             df_trend = df.copy()
             df_trend = df_trend[df_trend["date_publication"] >= df_filtered["date_publication"].min()]
             df_trend["Mois"] = df_trend["date_publication"].dt.to_period("M")
 
             def compute_imr_per_month(df_input):
-                # FIX : S'assurer que 'is_risque_grave' est calculé dans cette fonction
-                if 'risques_encourus' in df_input.columns:
-                    df_input['is_risque_grave'] = df_input["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
-                else:
+                if 'risques_encourus' not in df_input.columns:
                     return pd.DataFrame()
                     
+                df_input['is_risque_grave'] = df_input["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
                 df_input['score_gravite'] = np.where(df_input['is_risque_grave'], 2, 1)
                 
                 imr_monthly = df_input.groupby('Mois').agg(
@@ -300,7 +332,6 @@ with tab1:
                     Total_Rappels=('score_gravite', 'count')
                 ).reset_index()
                 
-                # Éviter la division par zéro
                 imr_monthly['IMR'] = np.where(imr_monthly['Total_Rappels'] > 0, 
                                               (imr_monthly['Total_Score'] / imr_monthly['Total_Rappels']) * 10, 
                                               0.0)
@@ -319,7 +350,6 @@ with tab1:
                                 color_discrete_map={f'IMR_{marque.title()}': '#2C3E50', 'IMR_Marché': '#BDC3C7'},
                                 line_shape='spline', markers=True)
             
-            # Ajout du seuil d'alerte critique
             fig_trend.add_hline(y=SEUIL_IMR_ALERTE, line_dash="dot", line_color="red", 
                                 annotation_text="Seuil Alerte IMR", 
                                 annotation_position="top right")
@@ -329,80 +359,101 @@ with tab1:
             st.info("Sélectionnez une marque dans la sidebar pour afficher l'IMR et la tendance.")
 
     st.markdown("---")
-    st.subheader("3. Corrélation : Matrice des Motifs vs. Risques")
-    
-    if "risques_encourus" in df_filtered.columns and "motif_du_rappel" in df_filtered.columns:
-        df_corr = df_filtered.copy()
-        df_corr["Motif_court"] = df_corr["motif_du_rappel"].str.split(r'[;.,]').str[0].str.strip()
-        
-        df_exploded_motif_risque = df_corr.assign(risques_encourus=df_corr['risques_encourus'].str.split(';')).explode('risques_encourus')
-        df_exploded_motif_risque['risques_encourus'] = df_exploded_motif_risque['risques_encourus'].str.strip()
-        
-        cooccurrence = df_exploded_motif_risque.groupby(['Motif_court', 'risques_encourus']).size().reset_index(name='Nombre')
-        cooccurrence = cooccurrence[cooccurrence['Nombre'] > 0]
-        
-        top_motifs_list = cooccurrence['Motif_court'].value_counts().head(5).index
-        top_risques_list = cooccurrence['risques_encourus'].value_counts().head(5).index
-        
-        cooccurrence_filtered = cooccurrence[
-            cooccurrence['Motif_court'].isin(top_motifs_list) & 
-            cooccurrence['risques_encourus'].isin(top_risques_list)
-        ]
-        
-        if not cooccurrence_filtered.empty:
-            fig_heatmap = px.density_heatmap(cooccurrence_filtered, x="Motif_court", y="risques_encourus", z="Nombre", 
-                                             title="Fréquence d'association des Top 5 Motifs et Top 5 Risques",
-                                             text_auto=True, color_continuous_scale="Plasma")
-            st.plotly_chart(fig_heatmap, use_container_width=True)
-        else:
-            st.info("Pas assez de données pour générer la matrice de corrélation Motif/Risque.")
+    # NOUVEAU INDICATEUR : Donut Chart NCF Fournisseur
+    if 'identifiant_de_l_etablissement_d_ou_provient_le_produit' in df_filtered.columns and total_fournisseurs_impactes > 0:
+        st.subheader("3. Dépendance au Risque Fournisseur (NCF T1)")
+        df_ncf = pd.DataFrame({
+            'Type': ['Fournisseurs Impactés', 'Fournisseurs non Impactés'],
+            'Count': [total_fournisseurs_impactes, max(0, total_fournisseurs_t1 - total_fournisseurs_impactes)]
+        })
+        fig_donut = px.pie(df_ncf, values='Count', names='Type', hole=.5, 
+                           title=f"Taux de Non-Conformité (NCF) des {total_fournisseurs_t1} Fournisseurs T1 (Simulé)",
+                           color_discrete_sequence=['#E74C3C', '#2ECC71'])
+        st.plotly_chart(fig_donut, use_container_width=True)
+    else:
+         st.markdown("### 3. Corrélation : Matrice des Motifs vs. Risques")
+         # Ancien Heatmap de corrélation
+         if "risques_encourus" in df_filtered.columns and "motif_du_rappel" in df_filtered.columns:
+            df_corr = df_filtered.copy()
+            df_corr["Motif_court"] = df_corr["motif_du_rappel"].str.split(r'[;.,]').str[0].str.strip()
+            
+            df_exploded_motif_risque = df_corr.assign(risques_encourus=df_corr['risques_encourus'].str.split(';')).explode('risques_encourus')
+            df_exploded_motif_risque['risques_encourus'] = df_exploded_motif_risque['risques_encourus'].str.strip()
+            
+            cooccurrence = df_exploded_motif_risque.groupby(['Motif_court', 'risques_encourus']).size().reset_index(name='Nombre')
+            cooccurrence = cooccurrence[cooccurrence['Nombre'] > 0]
+            
+            top_motifs_list = cooccurrence['Motif_court'].value_counts().head(5).index
+            top_risques_list = cooccurrence['risques_encourus'].value_counts().head(5).index
+            
+            cooccurrence_filtered = cooccurrence[
+                cooccurrence['Motif_court'].isin(top_motifs_list) & 
+                cooccurrence['risques_encourus'].isin(top_risques_list)
+            ]
+            
+            if not cooccurrence_filtered.empty:
+                fig_heatmap = px.density_heatmap(cooccurrence_filtered, x="Motif_court", y="risques_encourus", z="Nombre", 
+                                                 title="Fréquence d'association des Top 5 Motifs et Top 5 Risques",
+                                                 text_auto=True, color_continuous_scale="Plasma")
+                st.plotly_chart(fig_heatmap, use_container_width=True)
+            else:
+                st.info("Pas assez de données pour générer la matrice de corrélation Motif/Risque.")
 
 
 # ----------------------------------------------------------------------
-# TAB 2: DISTRIBUTEURS & RETAILERS (MATRICE DE RISQUE LOGISTIQUE)
+# TAB 2: DISTRIBUTEURS & RETAILERS (MATRICE DE RISQUE LOGISTIQUE & GÉOSPATIALITÉ)
 # ----------------------------------------------------------------------
 with tab2:
-    st.header("🛒 Analyse du Canal de Distribution & Risque Fournisseur")
+    st.header("🛒 Analyse du Canal de Distribution & Risque Logistique")
 
     # --- KPI DISTRIBUTEUR ---
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     col1.metric("Total Rappels (Filtré)", total_rappels)
     col2.metric("Délai Moyen (Marché)", vitesse_reponse)
-    col3.metric("Coût Logistique Max/Distributeur (Simulé)", f"{COUT_LOGISTIQUE_JOUR_SUPP:,.0f} € / Jour", help="Coût logistique journalier estimé pour la gestion des stocks à retirer.")
+    col3.metric("Coût Logistique Max/Distributeur", f"{COUT_LOGISTIQUE_JOUR_SUPP:,.0f} € / Jour")
     col4.metric("% Rappels à Risque Grave", pc_risques_graves_str)
+    
+    # NOUVEAU KPI 1 : Densité Distributeurs
+    if "distributeurs" in df_filtered.columns:
+        df_distrib_exploded = explode_column(df_filtered, 'distributeurs')
+        distrib_counts = df_distrib_exploded['distributeurs'].value_counts()
+        densite_distrib = distrib_counts.mean() if not distrib_counts.empty else 0.0
+        col5.metric("Densité Moy. Rappel/Distributeur", f"{densite_distrib:.1f}")
+    else:
+        col5.metric("Densité Moy. Rappel/Distributeur", "N/A")
+        
+    # NOUVEAU KPI 2 : Taux de Couverture du Rappel (TCR) (Simulé)
+    # Simulation: % de zone de vente touchée par un rappel et où le retrait est bien documenté (arbitraire 85%)
+    taux_couverture_rappel = 85.0
+    col6.metric("Taux de Couverture du Rappel (Simulé)", f"{taux_couverture_rappel:.1f}%", help="KPI Simulé : % des zones géographiques couvertes par une action de retrait documentée (cible : 95%).")
 
-    st.markdown("### Matrice de Priorisation du Risque Distributeur (Bubble Chart)")
+
+    st.markdown("### 1. Matrice de Priorisation du Risque Distributeur (Bubble Chart)")
     
     if "date_debut_commercialisation" in df_filtered.columns and "distributeurs" in df_filtered.columns:
             
-        # 1. Joindre le distributeur aux données de dates
         df_reponse = df_filtered.dropna(subset=["date_publication", "date_debut_commercialisation", "distributeurs"]).copy()
         df_reponse = df_reponse.assign(distributeurs=df_reponse['distributeurs'].str.split(';')).explode('distributeurs')
         df_reponse['distributeurs'] = df_reponse['distributeurs'].str.strip()
         df_reponse = df_reponse[df_reponse['distributeurs'] != '']
         
-        # 2. Calculer le Délai et la Gravité
         df_reponse["Délai_Jours"] = (df_reponse["date_publication"] - df_reponse["date_debut_commercialisation"]).dt.days
         df_reponse = df_reponse[df_reponse["Délai_Jours"] >= 0]
-        # FIX : Calculer is_risque_grave ici pour le score
+        
         if 'risques_encourus' in df_reponse.columns:
             df_reponse['is_risque_grave'] = df_reponse["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
             df_reponse['Score_Gravite'] = np.where(df_reponse['is_risque_grave'], 2, 1) # 2x plus important si Grave
         else:
             df_reponse['Score_Gravite'] = 1
         
-        # 3. Agrégation par Distributeur
         avg_distrib = df_reponse.groupby("distributeurs").agg(
             Délai_Moyen_Jours=('Délai_Jours', 'mean'),
             Nb_Rappels=('Délai_Jours', 'count'),
             Gravite_Moyenne=('Score_Gravite', 'mean')
         ).reset_index()
         
-        # 4. Calcul du Coût d'Exposition au Risque (Taille de la bulle)
-        # Simulation: Délai * (Nb_Rappels * Coût Logistique Jour * Gravité)
         avg_distrib['Coût_Risque_Simulé'] = avg_distrib['Délai_Moyen_Jours'] * avg_distrib['Nb_Rappels'] * avg_distrib['Gravite_Moyenne'] * COUT_LOGISTIQUE_JOUR_SUPP / 1000 # Divisé par 1000 pour taille lisible
         
-        # 5. Création de la Matrice (Bubble Chart)
         if not avg_distrib.empty:
             fig_bubble = px.scatter(avg_distrib, 
                                     x="Délai_Moyen_Jours", 
@@ -420,7 +471,6 @@ with tab2:
                                     },
                                     color_continuous_scale=px.colors.sequential.YlOrRd)
             
-            # Ajout des lignes de quadrants (stratégiques)
             if not avg_distrib.empty:
                 fig_bubble.add_vline(x=avg_distrib['Délai_Moyen_Jours'].median(), line_dash="dash", line_color="#34495E")
                 fig_bubble.add_hline(y=avg_distrib['Nb_Rappels'].median(), line_dash="dash", line_color="#34495E")
@@ -430,54 +480,116 @@ with tab2:
         else:
             st.info("Données insuffisantes pour la matrice de risque distributeur.")
     else:
-        st.info("Colonnes de date de commercialisation et/ou distributeurs manquantes dans le fichier CSV.")
+        st.info("Colonnes de date de commercialisation et/ou distributeurs manquantes.")
+        
+    
+    st.markdown("---")
+    st.subheader("2. Répartition Géospatiale du Risque (Heatmap)")
+    
+    if "zone_geographique_de_vente" in df_filtered.columns:
+        df_geo = explode_column(df_filtered, "zone_geographique_de_vente")
+        
+        # Tentative d'extraction du code départemental/régional (très simplifié)
+        df_geo['zone_clean'] = df_geo['zone_geographique_de_vente'].str.extract(r'(\d{2,3})') # Extraire les nombres à 2 ou 3 chiffres (code postal/dept)
+        df_geo = df_geo.dropna(subset=['zone_clean'])
+        
+        # Agrégation par zone (code département)
+        geo_counts = df_geo.groupby('zone_clean').size().reset_index(name='Nombre_Rappels')
+        
+        if not geo_counts.empty:
+            
+            # Pour simuler la carte de France (Choropleth), nous avons besoin d'un GeoJSON.
+            # Sans GeoJSON facilement chargeable dans cet environnement, nous utilisons une carte simplifiée:
+            try:
+                # Si le fichier GeoJSON est disponible, on peut utiliser le Choropleth
+                fig_map = px.choropleth(geo_counts,
+                                        geojson=load_geojson(),
+                                        locations='zone_clean',
+                                        featureidkey="properties.code", # Clé correspondant au code dans le GeoJSON
+                                        color='Nombre_Rappels',
+                                        projection="mercator",
+                                        title="Répartition Géospatiale du Nombre de Rappels (par Code Département/Zone)",
+                                        color_continuous_scale="Plasma")
+                fig_map.update_geos(fitbounds="locations", visible=False)
+                st.plotly_chart(fig_map, use_container_width=True)
+            except Exception:
+                # Solution de repli si le GeoJSON manque ou si la zone de vente est trop générique
+                st.warning("⚠️ Impossible de charger la carte Choropleth France (GeoJSON manquant). Affichage du Top 10 des zones.")
+                
+                top_zones = geo_counts.sort_values(by='Nombre_Rappels', ascending=False).head(10)
+                fig_fallback = px.bar(top_zones, x='Nombre_Rappels', y='zone_clean', orientation='h',
+                                      title="Top 10 : Zones de Vente les plus impactées",
+                                      labels={'zone_clean': 'Code Zone / Département (Extrait)', 'Nombre_Rappels': 'Nombre de Rappels'},
+                                      color='Nombre_Rappels', color_continuous_scale=px.colors.sequential.Sunset)
+                fig_fallback.update_layout(yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig_fallback, use_container_width=True)
+        else:
+            st.info("Données de zone géographique de vente insuffisantes pour la cartographie.")
+    else:
+        st.info("Colonne 'zone_geographique_de_vente' manquante pour l'analyse géospatiale.")
+
 
 
 # ----------------------------------------------------------------------
-# TAB 3: RISQUE & CONFORMITÉ (DÉRIVE DES CAUSES RACINES)
+# TAB 3: RISQUE & CONFORMITÉ (DÉRIVE DES CAUSES RACINES & PROFIL DE RISQUE)
 # ----------------------------------------------------------------------
 with tab3:
     st.header("🔬 Évaluation de la Gravité et Tendance du Risque (Assurance & Conseil)")
 
     # --- KPI CONFORMITÉ ---
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Risque Principal (Focus)", risque_principal)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1.metric("Risque Principal", risque_principal)
     col2.metric("% Rappels Graves", pc_risques_graves_str)
-    col3.metric("Délai Moyen Commercialisation", vitesse_reponse, help="Durée moyenne (en jours) de présence du produit défectueux sur le marché avant le rappel. Un nombre faible = meilleure réactivité globale du marché.")
+    col3.metric("Délai Moyen Commercialisation", vitesse_reponse)
     
-    # Indicateur de Volatilité du Marché
     df_vol = df_filtered.groupby(df_filtered["date_publication"].dt.to_period("M")).size().reset_index(name="Rappels")
     volatilite = df_vol["Rappels"].std() if not df_vol.empty else 0
-    col4.metric("Volatilité Mensuelle (Écart-type)", f"{volatilite:.1f}", help="Écart-type du nombre de rappels par mois. Un nombre élevé signifie un marché imprévisible.")
+    col4.metric("Volatilité Mensuelle", f"{volatilite:.1f}")
+    
+    # NOUVEAU KPI 1 : Diversité des Risques
+    if not df_risques_exploded.empty:
+        diversite_risques = df_risques_exploded['risques_encourus'].nunique()
+        col5.metric("Diversité des Risques", diversite_risques, help="Nombre de types de risques encourus différents identifiés dans la période (e.g. Bactérie, Physique, Allergène).")
+    else:
+        col5.metric("Diversité des Risques", "N/A")
+        
+    # NOUVEAU KPI 2 : Risque Moyen Pondéré par Catégorie (RMPC) - Simulation
+    # Le RMPC est simulé ici comme la gravité moyenne des 3 principaux motifs
+    if "motif_du_rappel" in df_filtered.columns and not df_filtered.empty:
+        # Reprendre l'IMR comme score de gravité
+        df_temp_imr = df_filtered.copy()
+        df_temp_imr["is_risque_grave"] = df_temp_imr["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
+        df_temp_imr['score_gravite'] = np.where(df_temp_imr['is_risque_grave'], 2, 1)
+
+        motif_graves = df_temp_imr.groupby('motif_du_rappel')['score_gravite'].mean().reset_index()
+        top_motifs_graves = motif_graves.sort_values(by='score_gravite', ascending=False).head(1)
+        
+        rmpc = top_motifs_graves['score_gravite'].mean() * 10 if not top_motifs_graves.empty else 0.0
+        col6.metric("RMPC (Simulé)", f"{rmpc:.2f}", help="Risque Moyen Pondéré par Catégorie : Gravité moyenne des motifs principaux (échelle de 0 à 20).")
+    else:
+        col6.metric("RMPC (Simulé)", "N/A")
 
 
-    st.markdown("### 2. Tendance : Dérive des Causes Racines (DCR) - Taux d'Émergence des Motifs")
+    st.markdown("### 1. Tendance : Dérive des Causes Racines (DCR) - Taux d'Émergence des Motifs")
     
     if "date_publication" in df_filtered.columns and "motif_du_rappel" in df_filtered.columns:
         
-        # 1. Préparer les données
         df_trend = df_filtered.copy()
         df_trend["Mois"] = df_trend["date_publication"].dt.to_period("M")
         
         df_motifs = explode_column(df_trend, "motif_du_rappel")
-        # S'assurer que les indices correspondent après l'explosion
         df_motifs = df_motifs.reset_index().rename(columns={'index': 'original_index'})
         df_motifs_merged = pd.merge(df_motifs, df_trend[['Mois']].reset_index().rename(columns={'index': 'original_index'}), on='original_index', how='left')
         
-        # 2. Calcul du classement mensuel
         motif_counts = df_motifs_merged.groupby(['Mois', 'motif_du_rappel']).size().reset_index(name='Rappels')
-        
-        # Calcul du Rang (Rank) par mois
         motif_counts['Rang'] = motif_counts.groupby('Mois')['Rappels'].rank(method='first', ascending=False)
         
-        # Filtrer le top 5 des motifs globaux pour lisibilité
         top_motifs_global = motif_counts['motif_du_rappel'].value_counts().head(5).index
         df_rank = motif_counts[motif_counts['motif_du_rappel'].isin(top_motifs_global)].copy()
         
         df_rank['Mois'] = df_rank['Mois'].dt.to_timestamp()
         
         if not df_rank.empty:
-            # 3. Création du Bump Chart
             fig_bump = px.line(df_rank, 
                                x="Mois", 
                                y="Rang", 
@@ -498,27 +610,35 @@ with tab3:
         st.info("Colonnes manquantes pour l'analyse des motifs.")
 
     st.markdown("---")
-    st.subheader("3. Corrélation : Risque vs. Catégorie (Analyse de Portefeuille)")
+    st.subheader("2. Profil de Risque (Radar Chart RMPC)")
     
-    if not df_risques_exploded.empty and "categorie_de_produit" in df_filtered.columns:
-        
-        df_temp_risques = df_filtered.assign(risques_encourus=df_filtered['risques_encourus'].str.split(';')).explode('risques_encourus')
-        df_temp_risques['risques_encourus'] = df_temp_risques['risques_encourus'].str.strip()
+    if "categorie_de_produit" in df_filtered.columns and "risques_encourus" in df_filtered.columns:
+        # Calcul du score de risque moyen par catégorie
+        df_radar = df_filtered.copy()
+        df_radar['is_risque_grave'] = df_radar["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
+        df_radar['score_gravite'] = np.where(df_radar['is_risque_grave'], 2, 1)
 
-        risque_cat_counts = df_temp_risques.groupby(['categorie_de_produit', 'risques_encourus']).size().reset_index(name='Nombre')
-        risque_cat_counts = risque_cat_counts[risque_cat_counts['Nombre'] > 0]
+        cat_scores = df_radar.groupby('categorie_de_produit').agg(
+            RMPC=('score_gravite', 'mean'),
+            Frequence=('categorie_de_produit', 'count')
+        ).reset_index()
         
-        top_risques_list = risque_cat_counts['risques_encourus'].value_counts().head(5).index
-        risque_cat_filtered = risque_cat_counts[risque_cat_counts['risques_encourus'].isin(top_risques_list)]
-
-        if not risque_cat_filtered.empty:
-            fig_bar = px.bar(risque_cat_filtered, x="categorie_de_produit", y="Nombre", color="risques_encourus", 
-                             title="Distribution des 5 principaux risques par Catégorie de Produit",
-                             labels={"categorie_de_produit": "Catégorie", "Nombre": "Nombre de Rappels"},
-                             color_discrete_sequence=px.colors.qualitative.G10)
-            st.plotly_chart(fig_bar, use_container_width=True)
+        cat_scores['RMPC'] = cat_scores['RMPC'] * 10 # Remettre sur une échelle plus lisible (max 20)
+        
+        # Filtrer les 5 catégories les plus fréquentes pour lisibilité du radar
+        top_cats = cat_scores.sort_values(by='Frequence', ascending=False).head(5)
+        
+        if not top_cats.empty:
+            fig_radar = px.line_polar(top_cats, r='RMPC', theta='categorie_de_produit', line_close=True,
+                                      title="Profil de Risque Moyen Pondéré par Catégorie (RMPC)",
+                                      color_discrete_sequence=['#E67E22'])
+            fig_radar.update_traces(fill='toself')
+            fig_radar.update_layout(polar=dict(
+                radialaxis=dict(visible=True, range=[0, 20])
+            ))
+            st.plotly_chart(fig_radar, use_container_width=True)
         else:
-             st.info("Pas assez de données pour générer le croisement Risque/Catégorie.")
+            st.info("Données insuffisantes pour le Profil de Risque (Radar Chart).")
     else:
          st.info("Données de risque et/ou de catégorie manquantes.")
 
