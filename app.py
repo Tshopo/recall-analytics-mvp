@@ -4,7 +4,6 @@ import plotly.express as px
 import os 
 from datetime import datetime
 import numpy as np
-from collections import defaultdict
 import json 
 import plotly.graph_objects as go
 
@@ -17,10 +16,8 @@ SEUIL_IMR_ALERTE = 10.0
 risques_graves_keywords = "listeriose|salmonellose|e\.coli|blessures|allergene non declare|corps étranger" 
 
 # --- NOUVELLES CONSTANTES : LOGIQUE TRAFFIC LIGHT ---
-# Seuil basé sur le nombre de rappels (simplifié pour cet indicateur)
-SEUIL_VERT_MAX = 5     # 0 à 5 rappels : Vert
-SEUIL_ORANGE_MAX = 15  # 6 à 15 rappels : Orange
-# Plus de 15 rappels : Rouge (critique)
+SEUIL_VERT_MAX = 5     
+SEUIL_ORANGE_MAX = 15  
 
 # Fonction pour attribuer un "Traffic Light"
 def get_traffic_light(count):
@@ -36,12 +33,10 @@ def get_traffic_light(count):
 def load_geojson():
     """
     Tente de charger un fichier GeoJSON pour la cartographie.
-    Si le fichier est manquant ou non supporté par l'environnement, retourne None.
+    Si le fichier est manquant ou non supporté, retourne None.
     
-    INSTRUCTIONS POUR ACTIVER LA CARTE :
-    1. Téléchargez un GeoJSON des départements français (e.g., departements.geojson).
-    2. Placez le fichier dans le même répertoire que app.py.
-    3. Mettez à jour le chemin ci-dessous.
+    POUR ACTIVER LA CARTE:
+    Placez 'departements.geojson' dans le dossier de l'application.
     """
     geojson_path = "departements.geojson" # <-- Modifier ce chemin si nécessaire
     
@@ -164,7 +159,7 @@ def safe_filter_list(df_source, col_name, exploded=False):
 
 # --- 3. CHARGEMENT ET FILTRES GLOBAUX ---
 df = load_data_from_csv()
-geojson_data = load_geojson() # Tente de charger le GeoJSON ici
+geojson_data = load_geojson() 
 
 if df.empty:
     st.stop()
@@ -555,7 +550,6 @@ with tab2:
                                             geojson=geojson_data,
                                             locations='zone_clean',
                                             # ATTENTION : 'properties.code' est l'identifiant standard pour les codes départementaux. 
-                                            # Modifiez-le si votre GeoJSON utilise un autre champ (ex: 'properties.nom')
                                             featureidkey="properties.code", 
                                             color='Nombre_Rappels', # Colorez par le nombre pour la légende
                                             hover_name='zone_clean',
@@ -566,8 +560,6 @@ with tab2:
                                             height=500)
                     
                     fig_map.update_geos(fitbounds="locations", visible=False)
-                    
-                    # Cacher la légende pour forcer l'interprétation Green/Amber/Red
                     fig_map.update_layout(coloraxis_showscale=False) 
                     
                     st.plotly_chart(fig_map, use_container_width=True)
