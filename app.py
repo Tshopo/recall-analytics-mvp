@@ -5,26 +5,31 @@ import os
 from datetime import datetime
 import numpy as np
 from collections import defaultdict
-# Import pour la cartographie
 import json 
 import plotly.graph_objects as go
 
 
 # --- 0. SIMULATION DES COUTS STRATEGIQUES (EN DUR) ---
-# Ces valeurs sont des estimations de coûts internes simulées pour la stratégie.
-COUT_RAPPEl_GRAVE_UNITAIRE = 50000.0  # Coût estimé d'un rappel impliquant un risque grave (Listeria, Salmonelle)
-COUT_RAPPEl_MINEUR_UNITAIRE = 5000.0   # Coût estimé d'un rappel mineur (défaut d'étiquetage simple)
-COUT_LOGISTIQUE_JOUR_SUPP = 500.0      # Coût logistique / jour pour chaque distributeur après le délai "normal"
-SEUIL_IMR_ALERTE = 10.0                # Seuil à partir duquel un IMR est considéré critique
-risques_graves_keywords = "listeriose|salmonellose|e\.coli|blessures|allergene non declare|corps étranger" # Rendu global pour les fonctions
+COUT_RAPPEl_GRAVE_UNITAIRE = 50000.0  
+COUT_RAPPEl_MINEUR_UNITAIRE = 5000.0   
+COUT_LOGISTIQUE_JOUR_SUPP = 500.0      
+SEUIL_IMR_ALERTE = 10.0                
+risques_graves_keywords = "listeriose|salmonellose|e\.coli|blessures|allergene non declare|corps étranger" 
 
-# Simulation des données géospatiales pour la France (simplifié pour l'exemple)
-DEPARTEMENTS_FRANCE = {
-    '75': 'paris', '13': 'bouches-du-rhone', '69': 'rhone', '59': 'nord', '33': 'gironde',
-    '31': 'haute-garonne', '44': 'loire-atlantique', '67': 'bas-rhin', '974': 'la reunion',
-    '78': 'yvelines', '92': 'hauts-de-seine', '62': 'pas-de-calais', '06': 'alpes-maritimes',
-    '34': 'herault'
-}
+# --- NOUVELLES CONSTANTES : LOGIQUE TRAFFIC LIGHT ---
+# Seuil basé sur le nombre de rappels (simplifié pour cet indicateur)
+SEUIL_VERT_MAX = 5     # 0 à 5 rappels : Vert
+SEUIL_ORANGE_MAX = 15  # 6 à 15 rappels : Orange
+# Plus de 15 rappels : Rouge (critique)
+
+# Fonction pour attribuer un "Traffic Light"
+def get_traffic_light(count):
+    if count <= SEUIL_VERT_MAX:
+        return "🟢 Faible (Green)"
+    elif count <= SEUIL_ORANGE_MAX:
+        return "🟠 Modéré (Amber)"
+    else:
+        return "🔴 Critique (Red)"
 
 # Charger un GeoJSON simple pour la France
 def load_geojson():
@@ -71,7 +76,7 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
             "numero_fiche": "reference_fiche",
             "lien_vers_la_fiche_rappel": "liens_vers_la_fiche_rappel",
             "date_debut_commercialisation_produit": "date_debut_commercialisation",
-            "nom_fabricant_ou_marque": "nom_marque_du_produit" # Si la colonne nom_marque_du_produit n'est pas présente.
+            "nom_fabricant_ou_marque": "nom_marque_du_produit" 
         }
         
         rename_dict = {old_name: new_name for old_name, new_name in column_mapping.items() if old_name in df.columns and old_name != new_name}
@@ -273,15 +278,12 @@ with tab1:
     col5.metric("Risque Principal", risque_principal)
     
     # NOUVEAU KPI: Taux de Non-Conformité Fournisseur (NCF)
-    # Simulation: Si 'identifiant_de_l_etablissement_d_ou_provient_le_produit' est présent, on compte les fournisseurs.
     if 'identifiant_de_l_etablissement_d_ou_provient_le_produit' in df_filtered.columns:
         df_fournisseurs = explode_column(df_filtered, 'identifiant_de_l_etablissement_d_ou_provient_le_produit')
         total_fournisseurs_impactes = df_fournisseurs['identifiant_de_l_etablissement_d_ou_provient_le_produit'].nunique() if not df_fournisseurs.empty else 0
     else:
-        # Simulation d'un NCF si la colonne est manquante (e.g. 5% de fournisseurs de T1 posent problème)
         total_fournisseurs_impactes = 0 
 
-    # Simulation d'une dépendance de 30 fournisseurs T1 au total
     total_fournisseurs_t1 = 30 
     if total_fournisseurs_t1 > 0 and 'identifiant_de_l_etablissement_d_ou_provient_le_produit' in df_filtered.columns:
         taux_ncf = (total_fournisseurs_impactes / total_fournisseurs_t1) * 100
@@ -314,7 +316,6 @@ with tab1:
         if marque != "Toutes" and "date_publication" in df_filtered.columns:
             
             df_trend = df.copy()
-            # On prend toutes les données du df pour l'IMR Marché, mais on coupe à la date la plus ancienne du filtre pour rester pertinent
             df_trend = df_trend[df_trend["date_publication"] >= df_filtered["date_publication"].min()]
             df_trend["Mois"] = df_trend["date_publication"].dt.to_period("M")
 
@@ -359,7 +360,7 @@ with tab1:
                 st.info("Sélectionnez une marque dans la sidebar pour afficher l'IMR et la tendance.")
 
     st.markdown("---")
-    # NOUVEAU INDICATEUR : Donut Chart NCF Fournisseur
+    # Donut Chart NCF Fournisseur / Matrice Corrélation
     if 'identifiant_de_l_etablissement_d_ou_provient_le_produit' in df_filtered.columns and total_fournisseurs_impactes > 0:
         st.subheader("3. Dépendance au Risque Fournisseur (NCF T1)")
         df_ncf = pd.DataFrame({
@@ -372,7 +373,6 @@ with tab1:
         st.plotly_chart(fig_donut, use_container_width=True)
     else:
          st.markdown("### 3. Corrélation : Matrice des Motifs vs. Risques")
-         # Ancien Heatmap de corrélation
          if "risques_encourus" in df_filtered.columns and "motif_du_rappel" in df_filtered.columns:
             df_corr = df_filtered.copy()
             df_corr["Motif_court"] = df_corr["motif_du_rappel"].str.split(r'[;.,]').str[0].str.strip()
@@ -380,7 +380,6 @@ with tab1:
             df_exploded_motif_risque = df_corr.assign(risques_encourus=df_corr['risques_encourus'].str.split(';')).explode('risques_encourus')
             df_exploded_motif_risque['risques_encourus'] = df_exploded_motif_risque['risques_encourus'].str.strip()
             
-            # --- Vérification de l'existence de données après explosion ---
             if df_exploded_motif_risque.empty:
                 st.info("Pas assez de données pour générer la matrice de corrélation Motif/Risque (après explosion des risques).")
             else:
@@ -429,7 +428,6 @@ with tab2:
         col5.metric("Densité Moy. Rappel/Distributeur", "N/A")
         
     # NOUVEAU KPI 2 : Taux de Couverture du Rappel (TCR) (Simulé)
-    # Simulation: % de zone de vente touchée par un rappel et où le retrait est bien documenté (arbitraire 85%)
     taux_couverture_rappel = 85.0
     col6.metric("Taux de Couverture du Rappel (Simulé)", f"{taux_couverture_rappel:.1f}%", help="KPI Simulé : % des zones géographiques couvertes par une action de retrait documentée (cible : 95%).")
 
@@ -438,7 +436,6 @@ with tab2:
     
     if "date_debut_commercialisation" in df_filtered.columns and "distributeurs" in df_filtered.columns:
             
-        # --- Point de contrôle critique pour le Bubble Chart ---
         df_reponse = df_filtered.dropna(subset=["date_publication", "date_debut_commercialisation", "distributeurs"]).copy()
         
         if df_reponse.empty:
@@ -448,7 +445,6 @@ with tab2:
             df_reponse['distributeurs'] = df_reponse['distributeurs'].str.strip()
             df_reponse = df_reponse[df_reponse['distributeurs'] != '']
             
-            # Nouveau contrôle après explosion
             if df_reponse.empty:
                 st.info("⚠️ Les données de distributeurs sont vides après nettoyage et explosion. (Vérifiez les valeurs de la colonne 'distributeurs')")
             else:
@@ -457,7 +453,7 @@ with tab2:
                 
                 if 'risques_encourus' in df_reponse.columns:
                     df_reponse['is_risque_grave'] = df_reponse["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
-                    df_reponse['Score_Gravite'] = np.where(df_reponse['is_risque_grave'], 2, 1) # 2x plus important si Grave
+                    df_reponse['Score_Gravite'] = np.where(df_reponse['is_risque_grave'], 2, 1) 
                 else:
                     df_reponse['Score_Gravite'] = 1
                 
@@ -467,7 +463,7 @@ with tab2:
                     Gravite_Moyenne=('Score_Gravite', 'mean')
                 ).reset_index()
                 
-                avg_distrib['Coût_Risque_Simulé'] = avg_distrib['Délai_Moyen_Jours'] * avg_distrib['Nb_Rappels'] * avg_distrib['Gravite_Moyenne'] * COUT_LOGISTIQUE_JOUR_SUPP / 1000 # Divisé par 1000 pour taille lisible
+                avg_distrib['Coût_Risque_Simulé'] = avg_distrib['Délai_Moyen_Jours'] * avg_distrib['Nb_Rappels'] * avg_distrib['Gravite_Moyenne'] * COUT_LOGISTIQUE_JOUR_SUPP / 1000 
                 
                 if not avg_distrib.empty:
                     fig_bubble = px.scatter(avg_distrib, 
@@ -499,56 +495,71 @@ with tab2:
         
     
     st.markdown("---")
-    st.subheader("2. Répartition Géospatiale du Risque (Heatmap)")
-    
+    st.subheader("2. Score de Risque Géographique (Traffic Light) ")
+    st.caption(f"Seuils : 🟢 0-{SEUIL_VERT_MAX} rappels, 🟠 {SEUIL_VERT_MAX+1}-{SEUIL_ORANGE_MAX} rappels, 🔴 >{SEUIL_ORANGE_MAX} rappels.")
+
     if "zone_geographique_de_vente" in df_filtered.columns:
         df_geo = explode_column(df_filtered, "zone_geographique_de_vente")
         
         # Tentative d'extraction du code départemental/régional (très simplifié)
         df_geo['zone_clean'] = df_geo['zone_geographique_de_vente'].str.extract(r'(\d{2,3})') # Extraire les nombres à 2 ou 3 chiffres (code postal/dept)
+        df_geo.loc[df_geo['zone_clean'].isna(), 'zone_clean'] = df_geo.loc[df_geo['zone_clean'].isna(), 'zone_geographique_de_vente'].str.split('-').str[0].str.strip()
         df_geo = df_geo.dropna(subset=['zone_clean'])
         
-        # Agrégation par zone (code département)
+        # Agrégation par zone
         geo_counts = df_geo.groupby('zone_clean').size().reset_index(name='Nombre_Rappels')
         
         if not geo_counts.empty:
+            # Attribution du Traffic Light
+            geo_counts['Niveau_Risque'] = geo_counts['Nombre_Rappels'].apply(get_traffic_light)
             
-            # Pour simuler la carte de France (Choropleth), nous avons besoin d'un GeoJSON.
-            try:
-                # Si le fichier GeoJSON est disponible, on peut utiliser le Choropleth
-                geojson_data = load_geojson()
-                if geojson_data:
+            # --- Affichage de l'alternative Traffic Light (Tableau) ---
+            
+            # Affichage de la carte Choropleth si GeoJSON disponible (avec attribution de couleur)
+            geojson_data = load_geojson()
+            if geojson_data:
+                
+                # Attribuer les couleurs pour la carte Plotly
+                def get_plotly_color(count):
+                    if count <= SEUIL_VERT_MAX: return 'green'
+                    elif count <= SEUIL_ORANGE_MAX: return 'orange'
+                    else: return 'red'
+                
+                geo_counts['Couleur'] = geo_counts['Nombre_Rappels'].apply(get_plotly_color)
+                
+                try:
                     fig_map = px.choropleth(geo_counts,
                                             geojson=geojson_data,
                                             locations='zone_clean',
-                                            featureidkey="properties.code", # Clé correspondant au code dans le GeoJSON
-                                            color='Nombre_Rappels',
-                                            projection="mercator",
-                                            title="Répartition Géospatiale du Nombre de Rappels (par Code Département/Zone)",
-                                            color_continuous_scale="Plasma")
+                                            featureidkey="properties.code", 
+                                            color='Couleur', # Utilisation de la colonne de couleur
+                                            color_discrete_map={'green': '#2ECC71', 'orange': '#F39C12', 'red': '#E74C3C'},
+                                            scope='europe', # Ou 'france' si disponible
+                                            title="Répartition Géospatiale du Risque (Traffic Light)",
+                                            height=500)
                     fig_map.update_geos(fitbounds="locations", visible=False)
                     st.plotly_chart(fig_map, use_container_width=True)
-                else:
-                    raise Exception("GeoJSON non chargé.") # Force la solution de repli
-            except Exception:
-                # Solution de repli si le GeoJSON manque ou si la zone de vente est trop générique
-                st.warning("⚠️ Impossible de charger la carte Choropleth France (GeoJSON manquant dans cet environnement). Affichage du Top 10 des zones.")
+                except Exception:
+                    st.warning("⚠️ Impossible d'afficher la carte Choropleth (GeoJSON manquant). Affichage du tableau de bord Traffic Light.")
+                    st.dataframe(geo_counts[['zone_clean', 'Nombre_Rappels', 'Niveau_Risque']].rename(columns={
+                        'zone_clean': 'Zone Géographique', 
+                        'Nombre_Rappels': 'Nbre de Rappels'
+                    }).sort_values(by='Nombre_Rappels', ascending=False), 
+                    hide_index=True, use_container_width=True)
+
+            else:
+                # Affichage du tableau de bord Traffic Light (par défaut si pas de GeoJSON)
+                st.info("Impossible de charger la carte Choropleth. Affichage du tableau de bord Traffic Light par Zone de Vente.")
+                st.dataframe(geo_counts[['zone_clean', 'Nombre_Rappels', 'Niveau_Risque']].rename(columns={
+                    'zone_clean': 'Zone Géographique', 
+                    'Nombre_Rappels': 'Nbre de Rappels'
+                }).sort_values(by='Nombre_Rappels', ascending=False), 
+                hide_index=True, use_container_width=True)
                 
-                top_zones = geo_counts.sort_values(by='Nombre_Rappels', ascending=False).head(10)
-                if not top_zones.empty:
-                    fig_fallback = px.bar(top_zones, x='Nombre_Rappels', y='zone_clean', orientation='h',
-                                          title="Top 10 : Zones de Vente les plus impactées",
-                                          labels={'zone_clean': 'Code Zone / Département (Extrait)', 'Nombre_Rappels': 'Nombre de Rappels'},
-                                          color='Nombre_Rappels', color_continuous_scale=px.colors.sequential.Sunset)
-                    fig_fallback.update_layout(yaxis={'categoryorder':'total ascending'})
-                    st.plotly_chart(fig_fallback, use_container_width=True)
-                else:
-                    st.info("Données de zone géographique de vente insuffisantes pour la cartographie de repli.")
         else:
-            st.info("Données de zone géographique de vente insuffisantes pour la cartographie.")
+            st.info("Données de zone géographique de vente insuffisantes pour l'analyse Traffic Light.")
     else:
         st.info("Colonne 'zone_geographique_de_vente' manquante pour l'analyse géospatiale.")
-
 
 
 # ----------------------------------------------------------------------
@@ -575,7 +586,7 @@ with tab3:
         col5.metric("Diversité des Risques", "N/A")
         
     # NOUVEAU KPI 2 : Risque Moyen Pondéré par Catégorie (RMPC) - Simulation
-    if "motif_du_rappel" in df_filtered.columns and not df_filtered.empty:
+    if "motif_du_rappel" in df_filtered.columns and "risques_encourus" in df_filtered.columns and not df_filtered.empty:
         df_temp_imr = df_filtered.copy()
         df_temp_imr["is_risque_grave"] = df_temp_imr["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
         df_temp_imr['score_gravite'] = np.where(df_temp_imr['is_risque_grave'], 2, 1)
@@ -640,10 +651,8 @@ with tab3:
     st.subheader("2. Profil de Risque (Radar Chart RMPC)")
     
     if "categorie_de_produit" in df_filtered.columns and "risques_encourus" in df_filtered.columns:
-        # Calcul du score de risque moyen par catégorie
         df_radar = df_filtered.copy()
         
-        # --- Point de contrôle critique pour le Radar Chart ---
         if df_radar.empty:
             st.info("⚠️ Les données filtrées sont vides. Ajustez les filtres pour générer le Profil de Risque (Radar Chart).")
         else:
@@ -655,9 +664,8 @@ with tab3:
                 Frequence=('categorie_de_produit', 'count')
             ).reset_index()
             
-            cat_scores['RMPC'] = cat_scores['RMPC'] * 10 # Remettre sur une échelle plus lisible (max 20)
+            cat_scores['RMPC'] = cat_scores['RMPC'] * 10 
             
-            # Filtrer les 5 catégories les plus fréquentes pour lisibilité du radar
             top_cats = cat_scores.sort_values(by='Frequence', ascending=False).head(5)
             
             if not top_cats.empty:
