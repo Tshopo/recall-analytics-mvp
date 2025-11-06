@@ -14,7 +14,8 @@ COUT_LOGISTIQUE_JOUR_SUPP = 500.0      # Coût logistique / jour pour chaque dis
 SEUIL_IMR_ALERTE = 10.0                # Seuil à partir duquel un IMR est considéré critique
 
 # --- 1. CONFIGURATION ET MISE EN PAGE GLOBALE ---
-st.set_page_page_config(page_title="Recall Analytics (RappelConso) - B2B PRO", layout="wide", initial_sidebar_state="expanded")
+# ATTENTION: Correction de l'erreur st.set_page_page_config -> st.set_page_config
+st.set_page_config(page_title="Recall Analytics (RappelConso) - B2B PRO", layout="wide", initial_sidebar_state="expanded")
 st.title("🛡️ Recall Analytics — Dashboard d'Intelligence Marché (B2B PRO) - Vue Stratégie DS")
 
 st.markdown("""
@@ -231,14 +232,9 @@ def calculate_imr(df_calc):
 # Calcul de l'IMR pour la marque filtrée
 imr_marque, cout_marque = calculate_imr(df_filtered)
 
-# Calcul de l'IMR pour l'ensemble du marché (période filtrée)
-imr_marche, _ = calculate_imr(df_filtered.copy()) # Ici, df_filtered est déjà le "marché" si pas de marque filtrée.
-# Pour simuler le marché, si une marque est filtrée, on calcule sur toute la période filtrée mais sur toutes les marques
-if marque != "Toutes":
-    df_marche_comp = df[df["date_publication"] >= df_filtered["date_publication"].min()]
-    imr_marche_comp, _ = calculate_imr(df_marche_comp)
-else:
-    imr_marche_comp = imr_marche
+# Calcul de l'IMR pour le marché (pour la comparaison)
+df_marche_comp = df[df["date_publication"] >= df_filtered["date_publication"].min()].copy()
+imr_marche_comp, _ = calculate_imr(df_marche_comp)
 
 
 # --- 5. STRUCTURE DU TABLEAU DE BORD PAR ACTEUR (TABS) ---
@@ -264,7 +260,7 @@ with tab1:
 
     with col_gauche:
         st.subheader("1. Benchmark : Part de Rappel par Marque (SoR)")
-        # ... (Le code du SoR reste inchangé)
+        
         if "nom_marque_du_produit" in df_filtered.columns and total_rappels > 0:
             top_marques = df_filtered["nom_marque_du_produit"].value_counts(normalize=True).mul(100).reset_index().rename(columns={
                 "nom_marque_du_produit": "Marque", 
@@ -296,7 +292,10 @@ with tab1:
                     Total_Rappels=('score_gravite', 'count')
                 ).reset_index()
                 
-                imr_monthly['IMR'] = (imr_monthly['Total_Score'] / imr_monthly['Total_Rappels']) * 10
+                # Éviter la division par zéro
+                imr_monthly['IMR'] = np.where(imr_monthly['Total_Rappels'] > 0, 
+                                              (imr_monthly['Total_Score'] / imr_monthly['Total_Rappels']) * 10, 
+                                              0.0)
                 imr_monthly['Mois'] = imr_monthly['Mois'].dt.to_timestamp()
                 return imr_monthly[['Mois', 'IMR']]
 
@@ -323,7 +322,7 @@ with tab1:
 
     st.markdown("---")
     st.subheader("3. Corrélation : Matrice des Motifs vs. Risques")
-    # ... (Le code du Heatmap reste inchangé)
+    
     if "risques_encourus" in df_filtered.columns and "motif_du_rappel" in df_filtered.columns:
         df_corr = df_filtered.copy()
         df_corr["Motif_court"] = df_corr["motif_du_rappel"].str.split(r'[;.,]').str[0].str.strip()
@@ -364,7 +363,6 @@ with tab2:
     col3.metric("Coût Logistique Max/Distributeur (Simulé)", f"{COUT_LOGISTIQUE_JOUR_SUPP:,.0f} € / Jour", help="Coût logistique journalier estimé pour la gestion des stocks à retirer.")
     col4.metric("% Rappels à Risque Grave", pc_risques_graves_str)
 
-    # --- GRAPHIQUES DISTRIBUTEUR ---
     st.markdown("### Matrice de Priorisation du Risque Distributeur (Bubble Chart)")
     
     if "date_debut_commercialisation" in df_filtered.columns and "distributeurs" in df_filtered.columns:
@@ -410,8 +408,9 @@ with tab2:
                                     color_continuous_scale=px.colors.sequential.YlOrRd)
             
             # Ajout des lignes de quadrants (stratégiques)
-            fig_bubble.add_vline(x=avg_distrib['Délai_Moyen_Jours'].median(), line_dash="dash", line_color="#34495E")
-            fig_bubble.add_hline(y=avg_distrib['Nb_Rappels'].median(), line_dash="dash", line_color="#34495E")
+            if not avg_distrib.empty:
+                fig_bubble.add_vline(x=avg_distrib['Délai_Moyen_Jours'].median(), line_dash="dash", line_color="#34495E")
+                fig_bubble.add_hline(y=avg_distrib['Nb_Rappels'].median(), line_dash="dash", line_color="#34495E")
 
             fig_bubble.update_layout(xaxis_range=[0, avg_distrib['Délai_Moyen_Jours'].max() * 1.1])
             st.plotly_chart(fig_bubble, use_container_width=True)
@@ -448,8 +447,9 @@ with tab3:
         df_trend["Mois"] = df_trend["date_publication"].dt.to_period("M")
         
         df_motifs = explode_column(df_trend, "motif_du_rappel")
+        # S'assurer que les indices correspondent après l'explosion
         df_motifs = df_motifs.reset_index().rename(columns={'index': 'original_index'})
-        df_motifs_merged = pd.merge(df_motifs, df_trend[['Mois', 'original_index']].reset_index(drop=True).rename(columns={'index': 'original_index'}), on='original_index', how='left')
+        df_motifs_merged = pd.merge(df_motifs, df_trend[['Mois']].reset_index().rename(columns={'index': 'original_index'}), on='original_index', how='left')
         
         # 2. Calcul du classement mensuel
         motif_counts = df_motifs_merged.groupby(['Mois', 'motif_du_rappel']).size().reset_index(name='Rappels')
@@ -486,7 +486,7 @@ with tab3:
 
     st.markdown("---")
     st.subheader("3. Corrélation : Risque vs. Catégorie (Analyse de Portefeuille)")
-    # ... (Le code du Bar chart reste inchangé)
+    
     if not df_risques_exploded.empty and "categorie_de_produit" in df_filtered.columns:
         
         df_temp_risques = df_filtered.assign(risques_encourus=df_filtered['risques_encourus'].str.split(';')).explode('risques_encourus')
