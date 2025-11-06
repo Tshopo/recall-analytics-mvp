@@ -64,16 +64,16 @@ div[data-testid="stMetric"] {
     border: 1px solid #e0e0e0; /* Bordure légère */
     margin-bottom: 10px; /* Espace sous chaque métrique */
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05); /* Ombre légère */
-    min-height: 100px; /* **Augmenté : Hauteur minimale pour mieux contenir le texte** */
+    min-height: 100px; /* Hauteur minimale pour mieux contenir le texte */
     display: flex; /* Utilise flexbox pour un meilleur alignement interne */
     flex-direction: column; /* Organise label et valeur verticalement */
     justify-content: center; /* Centre verticalement le contenu */
     align-items: flex-start; /* Aligne le contenu à gauche */
 }
 
-/* Réduit la taille de la police des valeurs st.metric */
+/* Augmente la taille de la police des valeurs st.metric */
 div[data-testid="stMetricValue"] {
-    font-size: 1.3rem; /* **Réduit encore : Taille de la valeur (ex: 15659)** */
+    font-size: 1.5rem; /* **AUGMENTÉ : Taille de la valeur (ex: 15659)** */
     font-weight: 700;
     white-space: normal; /* Permet au texte de s'enrouler */
     overflow: hidden; /* Cache le texte qui déborde */
@@ -83,7 +83,7 @@ div[data-testid="stMetricValue"] {
 
 /* Réduit la taille de la police des labels st.metric */
 div[data-testid="stMetricLabel"] > div {
-    font-size: 0.65rem; /* **Réduit encore : Taille du label (ex: Total Rappels (Périmètre))** */
+    font-size: 0.6rem; /* **RÉDUIT : Taille du label (ex: Total Rappels (Périmètre))** */
     font-weight: 600;
     opacity: 0.8;
     white-space: normal; /* Permet au texte de s'enrouler */
