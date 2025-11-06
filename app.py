@@ -285,6 +285,7 @@ else:
 
 tab1, tab2, tab3 = st.tabs(["🏭 Fabricants & Marques", "🛒 Distributeurs & Retailers", "🔬 Risque & Conformité"])
 
+
 # ----------------------------------------------------------------------
 # TAB 1: FABRICANTS & MARQUES (BENCHMARKING IMR & RISQUE FOURNISSEUR)
 # ----------------------------------------------------------------------
@@ -426,9 +427,10 @@ with tab1:
          else:
              st.info("Colonnes de risque et/ou de motif manquantes pour la matrice.")
 
----
-# 🛒 Distributeurs & Retailers
 
+# ----------------------------------------------------------------------
+# TAB 2: DISTRIBUTEURS & RETAILERS (MATRICE DE RISQUE LOGISTIQUE & GÉOSPATIALITÉ)
+# ----------------------------------------------------------------------
 with tab2:
     st.header("🛒 Analyse du Canal de Distribution & Risque Logistique")
 
@@ -548,9 +550,7 @@ with tab2:
                 geo_counts['Couleur_Hex'] = geo_counts['Nombre_Rappels'].apply(get_plotly_color)
                 
                 try:
-                    # Pour utiliser une carte choroplèthe, Plotly a besoin d'une colonne 'color' 
-                    # et d'une mapping du GeoJSON (featureidkey) vers les valeurs 'locations'
-                    
+                    # Le champ 'properties.code' doit correspondre au champ d'ID du GeoJSON
                     fig_map = px.choropleth(geo_counts,
                                             geojson=geojson_data,
                                             locations='zone_clean',
@@ -590,7 +590,6 @@ with tab2:
                 st.dataframe(geo_counts[['zone_clean', 'Nombre_Rappels', 'Niveau_Risque']].rename(columns={
                     'zone_clean': 'Zone Géographique', 
                     'Nombre_Rappels': 'Nbre de Rappels'
-                # Correction du KeyError appliquée ici : trier par le nom de colonne renommé 'Nbre de Rappels'
                 }).sort_values(by='Nbre de Rappels', ascending=False), 
                 hide_index=True, use_container_width=True)
                 
@@ -599,9 +598,10 @@ with tab2:
     else:
         st.info("Colonne 'zone_geographique_de_vente' manquante pour l'analyse géospatiale.")
 
----
-# 🔬 Risque & Conformité
 
+# ----------------------------------------------------------------------
+# TAB 3: RISQUE & CONFORMITÉ (DÉRIVE DES CAUSES RACINES & PROFIL DE RISQUE)
+# ----------------------------------------------------------------------
 with tab3:
     st.header("🔬 Évaluation de la Gravité et Tendance du Risque (Assurance & Conseil)")
 
