@@ -12,19 +12,51 @@ st.markdown("""
 **Objectif :** Fournir des insights actionnables sur la fréquence, la gravité et l'exposition géographique des rappels.
 """)
 
-# --- FONCTION DE CHARGEMENT DE DONNÉES (Lecture CSV) ---
+# --- FONCTION DE CHARGEMENT DE DONNÉES (Lecture CSV Standardisée) ---
 @st.cache_data(ttl=3600)
 def load_data_from_csv(file_path="rappelconso_export.csv"):
-    """Charge les données à partir d'un fichier CSV local (celui que vous avez téléchargé)."""
+    """Charge les données à partir d'un fichier CSV local, standardise les noms de colonnes."""
     
     if not os.path.exists(file_path):
         st.error(f"❌ Fichier non trouvé : '{file_path}'. Veuillez vous assurer que le fichier CSV téléchargé est placé dans le même dossier que l'application et porte ce nom.")
         return pd.DataFrame()
     
     try:
-        # Tente de lire le fichier
         df = pd.read_csv(file_path, sep=",") 
+        
+        # --- ÉTAPE CRITIQUE : STANDARDISATION DES NOMS DE COLONNES ---
+        # Si votre export CSV a des noms différents, ajoutez-les ici (ex: "votre_nom": "nom_attendu")
+        column_mapping = {
+            # Noms souvent utilisés dans les exports RappelConso -> Noms attendus par le script
+            "categorie_produit": "categorie_de_produit",
+            "marque_produit": "nom_marque_du_produit",
+            "motif_rappel": "motif_du_rappel",
+            "numero_fiche": "reference_fiche",
+            "libelle": "nom_du_produit",
+            "lien_vers_la_fiche_rappel": "liens_vers_la_fiche_rappel",
+            # Les noms suivants sont souvent déjà corrects:
+            "risques_encourus": "risques_encourus",
+            "date_publication": "date_publication",
+            "distributeurs": "distributeurs",
+            "zone_geographique_de_vente": "zone_geographique_de_vente"
+        }
+        
+        # Renommage
+        rename_dict = {
+            old_name: new_name for old_name, new_name in column_mapping.items() 
+            if old_name in df.columns and old_name != new_name # Évite de renommer si le nom est déjà correct
+        }
+        df = df.rename(columns=rename_dict)
 
+        # Diagnostic de colonnes critiques : si cela échoue, c'est que les noms sont encore différents.
+        required_cols = ["categorie_de_produit", "nom_marque_du_produit", "motif_du_rappel", "distributeurs"]
+        missing_cols = [c for c in required_cols if c not in df.columns]
+
+        if missing_cols:
+            st.error(f"⚠️ Alerte Colonnes : Les filtres affichent seulement 'Tous' car les colonnes critiques sont manquantes : **{', '.join(missing_cols)}**.")
+            st.warning("👉 **Action requise :** Votre CSV n'utilise pas les noms standards. Veuillez modifier la `column_mapping` dans la fonction `load_data_from_csv` avec les noms exacts. Vos colonnes sont : " + ", ".join(df.columns.tolist()))
+            st.stop()
+            
         # 1. Conversion de la date
         if "date_publication" in df.columns:
             df["date_publication"] = pd.to_datetime(df["date_publication"], errors="coerce", utc=True)
@@ -163,7 +195,7 @@ if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.c
     risque_counts = df_risques_exploded["risques_encourus"].value_counts()
     
     if not risque_counts.empty:
-        # CORRECTION : Utilisation de next() avec une valeur par défaut pour éviter l'erreur d'indice 0
+        # CORRECTION : Utilisation de next() pour éviter l'erreur d'indice 0
         risque_major = next(iter(risque_counts.index), None)
         if risque_major:
             risque_principal = risque_major.title()
