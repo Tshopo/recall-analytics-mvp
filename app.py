@@ -19,7 +19,6 @@ SEUIL_IMR_ALERTE = 10.0                # Seuil à partir duquel un IMR est consi
 risques_graves_keywords = "listeriose|salmonellose|e\.coli|blessures|allergene non declare|corps étranger" # Rendu global pour les fonctions
 
 # Simulation des données géospatiales pour la France (simplifié pour l'exemple)
-# Nous utiliserons les départements comme proxy des 'zones de vente' pour la visualisation.
 DEPARTEMENTS_FRANCE = {
     '75': 'paris', '13': 'bouches-du-rhone', '69': 'rhone', '59': 'nord', '33': 'gironde',
     '31': 'haute-garonne', '44': 'loire-atlantique', '67': 'bas-rhin', '974': 'la reunion',
@@ -27,13 +26,8 @@ DEPARTEMENTS_FRANCE = {
     '34': 'herault'
 }
 
-# Charger un GeoJSON simple pour la France (nécessite un fichier choropleth_france.json dans l'environnement)
-# Pour une simulation locale sans GeoJSON, nous allons simuler les codes de département dans les zones géographiques
+# Charger un GeoJSON simple pour la France
 def load_geojson():
-    # En environnement local, il faudrait charger un fichier GeoJSON comme celui-ci :
-    # if os.path.exists("choropleth_france.json"):
-    #     with open("choropleth_france.json", "r") as f:
-    #         return json.load(f)
     # Pour l'environnement Cloud/Streamlit sans fichier externe, on retourne None et on gère l'affichage en info.
     return None
 
@@ -188,6 +182,12 @@ if distrib != "Toutes" and "distributeurs" in df_filtered.columns:
 
 # --- 4. CALCULS TRANSVERSAUX (KPIs) ---
 total_rappels = len(df_filtered)
+
+if total_rappels == 0:
+    st.warning("⚠️ Aucun rappel trouvé avec les filtres actuels. Veuillez ajuster la période ou les sélections dans la sidebar.")
+    st.stop()
+
+
 df_risques_exploded = explode_column(df_filtered, "risques_encourus")
 
 # Risque principal
@@ -276,10 +276,7 @@ with tab1:
     # Simulation: Si 'identifiant_de_l_etablissement_d_ou_provient_le_produit' est présent, on compte les fournisseurs.
     if 'identifiant_de_l_etablissement_d_ou_provient_le_produit' in df_filtered.columns:
         df_fournisseurs = explode_column(df_filtered, 'identifiant_de_l_etablissement_d_ou_provient_le_produit')
-        if not df_fournisseurs.empty:
-            total_fournisseurs_impactes = df_fournisseurs['identifiant_de_l_etablissement_d_ou_provient_le_produit'].nunique()
-        else:
-            total_fournisseurs_impactes = 0
+        total_fournisseurs_impactes = df_fournisseurs['identifiant_de_l_etablissement_d_ou_provient_le_produit'].nunique() if not df_fournisseurs.empty else 0
     else:
         # Simulation d'un NCF si la colonne est manquante (e.g. 5% de fournisseurs de T1 posent problème)
         total_fournisseurs_impactes = 0 
@@ -317,11 +314,12 @@ with tab1:
         if marque != "Toutes" and "date_publication" in df_filtered.columns:
             
             df_trend = df.copy()
+            # On prend toutes les données du df pour l'IMR Marché, mais on coupe à la date la plus ancienne du filtre pour rester pertinent
             df_trend = df_trend[df_trend["date_publication"] >= df_filtered["date_publication"].min()]
             df_trend["Mois"] = df_trend["date_publication"].dt.to_period("M")
 
             def compute_imr_per_month(df_input):
-                if 'risques_encourus' not in df_input.columns:
+                if 'risques_encourus' not in df_input.columns or df_input.empty:
                     return pd.DataFrame()
                     
                 df_input['is_risque_grave'] = df_input["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
@@ -340,23 +338,25 @@ with tab1:
 
             df_imr_marque = compute_imr_per_month(df_trend[df_trend["nom_marque_du_produit"] == marque])
             df_imr_marche = compute_imr_per_month(df_trend)
-            df_imr_marche = df_imr_marche.rename(columns={'IMR': 'IMR_Marché'})
             
-            df_comp = pd.merge(df_imr_marque.rename(columns={'IMR': f'IMR_{marque.title()}'}), df_imr_marche, on='Mois', how='outer').fillna(0)
-            
-            fig_trend = px.line(df_comp, x="Mois", y=[f"IMR_{marque.title()}", "IMR_Marché"], 
-                                title=f"Évolution Mensuelle de l'IMR : {marque.title()} vs. Marché (Seuil Alerte {SEUIL_IMR_ALERTE})",
-                                labels={"value": "IMR (Score Pondéré)", "Mois": "Mois"},
-                                color_discrete_map={f'IMR_{marque.title()}': '#2C3E50', 'IMR_Marché': '#BDC3C7'},
-                                line_shape='spline', markers=True)
-            
-            fig_trend.add_hline(y=SEUIL_IMR_ALERTE, line_dash="dot", line_color="red", 
-                                annotation_text="Seuil Alerte IMR", 
-                                annotation_position="top right")
+            if not df_imr_marque.empty or not df_imr_marche.empty:
+                df_imr_marche = df_imr_marche.rename(columns={'IMR': 'IMR_Marché'})
+                
+                df_comp = pd.merge(df_imr_marque.rename(columns={'IMR': f'IMR_{marque.title()}'}), df_imr_marche, on='Mois', how='outer').fillna(0)
+                
+                fig_trend = px.line(df_comp, x="Mois", y=[f"IMR_{marque.title()}", "IMR_Marché"], 
+                                    title=f"Évolution Mensuelle de l'IMR : {marque.title()} vs. Marché (Seuil Alerte {SEUIL_IMR_ALERTE})",
+                                    labels={"value": "IMR (Score Pondéré)", "Mois": "Mois"},
+                                    color_discrete_map={f'IMR_{marque.title()}': '#2C3E50', 'IMR_Marché': '#BDC3C7'},
+                                    line_shape='spline', markers=True)
+                
+                fig_trend.add_hline(y=SEUIL_IMR_ALERTE, line_dash="dot", line_color="red", 
+                                    annotation_text="Seuil Alerte IMR", 
+                                    annotation_position="top right")
 
-            st.plotly_chart(fig_trend, use_container_width=True)
-        else:
-            st.info("Sélectionnez une marque dans la sidebar pour afficher l'IMR et la tendance.")
+                st.plotly_chart(fig_trend, use_container_width=True)
+            else:
+                st.info("Sélectionnez une marque dans la sidebar pour afficher l'IMR et la tendance.")
 
     st.markdown("---")
     # NOUVEAU INDICATEUR : Donut Chart NCF Fournisseur
@@ -380,24 +380,30 @@ with tab1:
             df_exploded_motif_risque = df_corr.assign(risques_encourus=df_corr['risques_encourus'].str.split(';')).explode('risques_encourus')
             df_exploded_motif_risque['risques_encourus'] = df_exploded_motif_risque['risques_encourus'].str.strip()
             
-            cooccurrence = df_exploded_motif_risque.groupby(['Motif_court', 'risques_encourus']).size().reset_index(name='Nombre')
-            cooccurrence = cooccurrence[cooccurrence['Nombre'] > 0]
-            
-            top_motifs_list = cooccurrence['Motif_court'].value_counts().head(5).index
-            top_risques_list = cooccurrence['risques_encourus'].value_counts().head(5).index
-            
-            cooccurrence_filtered = cooccurrence[
-                cooccurrence['Motif_court'].isin(top_motifs_list) & 
-                cooccurrence['risques_encourus'].isin(top_risques_list)
-            ]
-            
-            if not cooccurrence_filtered.empty:
-                fig_heatmap = px.density_heatmap(cooccurrence_filtered, x="Motif_court", y="risques_encourus", z="Nombre", 
-                                                 title="Fréquence d'association des Top 5 Motifs et Top 5 Risques",
-                                                 text_auto=True, color_continuous_scale="Plasma")
-                st.plotly_chart(fig_heatmap, use_container_width=True)
+            # --- Vérification de l'existence de données après explosion ---
+            if df_exploded_motif_risque.empty:
+                st.info("Pas assez de données pour générer la matrice de corrélation Motif/Risque (après explosion des risques).")
             else:
-                st.info("Pas assez de données pour générer la matrice de corrélation Motif/Risque.")
+                cooccurrence = df_exploded_motif_risque.groupby(['Motif_court', 'risques_encourus']).size().reset_index(name='Nombre')
+                cooccurrence = cooccurrence[cooccurrence['Nombre'] > 0]
+                
+                top_motifs_list = cooccurrence['Motif_court'].value_counts().head(5).index
+                top_risques_list = cooccurrence['risques_encourus'].value_counts().head(5).index
+                
+                cooccurrence_filtered = cooccurrence[
+                    cooccurrence['Motif_court'].isin(top_motifs_list) & 
+                    cooccurrence['risques_encourus'].isin(top_risques_list)
+                ]
+                
+                if not cooccurrence_filtered.empty:
+                    fig_heatmap = px.density_heatmap(cooccurrence_filtered, x="Motif_court", y="risques_encourus", z="Nombre", 
+                                                     title="Fréquence d'association des Top 5 Motifs et Top 5 Risques",
+                                                     text_auto=True, color_continuous_scale="Plasma")
+                    st.plotly_chart(fig_heatmap, use_container_width=True)
+                else:
+                    st.info("Pas assez de données pour générer la matrice de corrélation Motif/Risque.")
+         else:
+             st.info("Colonnes de risque et/ou de motif manquantes pour la matrice.")
 
 
 # ----------------------------------------------------------------------
@@ -432,53 +438,62 @@ with tab2:
     
     if "date_debut_commercialisation" in df_filtered.columns and "distributeurs" in df_filtered.columns:
             
+        # --- Point de contrôle critique pour le Bubble Chart ---
         df_reponse = df_filtered.dropna(subset=["date_publication", "date_debut_commercialisation", "distributeurs"]).copy()
-        df_reponse = df_reponse.assign(distributeurs=df_reponse['distributeurs'].str.split(';')).explode('distributeurs')
-        df_reponse['distributeurs'] = df_reponse['distributeurs'].str.strip()
-        df_reponse = df_reponse[df_reponse['distributeurs'] != '']
         
-        df_reponse["Délai_Jours"] = (df_reponse["date_publication"] - df_reponse["date_debut_commercialisation"]).dt.days
-        df_reponse = df_reponse[df_reponse["Délai_Jours"] >= 0]
-        
-        if 'risques_encourus' in df_reponse.columns:
-            df_reponse['is_risque_grave'] = df_reponse["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
-            df_reponse['Score_Gravite'] = np.where(df_reponse['is_risque_grave'], 2, 1) # 2x plus important si Grave
+        if df_reponse.empty:
+            st.info("⚠️ Les filtres appliqués n'ont généré aucune donnée valide (manque d'information de date de commercialisation et/ou distributeur) pour la Matrice de Risque Distributeur.")
         else:
-            df_reponse['Score_Gravite'] = 1
-        
-        avg_distrib = df_reponse.groupby("distributeurs").agg(
-            Délai_Moyen_Jours=('Délai_Jours', 'mean'),
-            Nb_Rappels=('Délai_Jours', 'count'),
-            Gravite_Moyenne=('Score_Gravite', 'mean')
-        ).reset_index()
-        
-        avg_distrib['Coût_Risque_Simulé'] = avg_distrib['Délai_Moyen_Jours'] * avg_distrib['Nb_Rappels'] * avg_distrib['Gravite_Moyenne'] * COUT_LOGISTIQUE_JOUR_SUPP / 1000 # Divisé par 1000 pour taille lisible
-        
-        if not avg_distrib.empty:
-            fig_bubble = px.scatter(avg_distrib, 
-                                    x="Délai_Moyen_Jours", 
-                                    y="Nb_Rappels", 
-                                    size="Coût_Risque_Simulé", 
-                                    color="Gravite_Moyenne",
-                                    hover_name="distributeurs",
-                                    size_max=40,
-                                    title="Matrice de Priorisation du Risque Distributeur (Coût Logistique/Jours Simulé)",
-                                    labels={
-                                        "Délai_Moyen_Jours": "Axe X: Délai Moyen avant Rappel (Jours) ➡ Risque de Durée",
-                                        "Nb_Rappels": "Axe Y: Fréquence des Rappels ➡ Risque de Volume",
-                                        "Gravite_Moyenne": "Gravité Moyenne (Couleur)",
-                                        "Coût_Risque_Simulé": "Coût d'Exposition au Risque Simulé (k€)"
-                                    },
-                                    color_continuous_scale=px.colors.sequential.YlOrRd)
+            df_reponse = df_reponse.assign(distributeurs=df_reponse['distributeurs'].str.split(';')).explode('distributeurs')
+            df_reponse['distributeurs'] = df_reponse['distributeurs'].str.strip()
+            df_reponse = df_reponse[df_reponse['distributeurs'] != '']
             
-            if not avg_distrib.empty:
-                fig_bubble.add_vline(x=avg_distrib['Délai_Moyen_Jours'].median(), line_dash="dash", line_color="#34495E")
-                fig_bubble.add_hline(y=avg_distrib['Nb_Rappels'].median(), line_dash="dash", line_color="#34495E")
+            # Nouveau contrôle après explosion
+            if df_reponse.empty:
+                st.info("⚠️ Les données de distributeurs sont vides après nettoyage et explosion. (Vérifiez les valeurs de la colonne 'distributeurs')")
+            else:
+                df_reponse["Délai_Jours"] = (df_reponse["date_publication"] - df_reponse["date_debut_commercialisation"]).dt.days
+                df_reponse = df_reponse[df_reponse["Délai_Jours"] >= 0]
+                
+                if 'risques_encourus' in df_reponse.columns:
+                    df_reponse['is_risque_grave'] = df_reponse["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
+                    df_reponse['Score_Gravite'] = np.where(df_reponse['is_risque_grave'], 2, 1) # 2x plus important si Grave
+                else:
+                    df_reponse['Score_Gravite'] = 1
+                
+                avg_distrib = df_reponse.groupby("distributeurs").agg(
+                    Délai_Moyen_Jours=('Délai_Jours', 'mean'),
+                    Nb_Rappels=('Délai_Jours', 'count'),
+                    Gravite_Moyenne=('Score_Gravite', 'mean')
+                ).reset_index()
+                
+                avg_distrib['Coût_Risque_Simulé'] = avg_distrib['Délai_Moyen_Jours'] * avg_distrib['Nb_Rappels'] * avg_distrib['Gravite_Moyenne'] * COUT_LOGISTIQUE_JOUR_SUPP / 1000 # Divisé par 1000 pour taille lisible
+                
+                if not avg_distrib.empty:
+                    fig_bubble = px.scatter(avg_distrib, 
+                                            x="Délai_Moyen_Jours", 
+                                            y="Nb_Rappels", 
+                                            size="Coût_Risque_Simulé", 
+                                            color="Gravite_Moyenne",
+                                            hover_name="distributeurs",
+                                            size_max=40,
+                                            title="Matrice de Priorisation du Risque Distributeur (Coût Logistique/Jours Simulé)",
+                                            labels={
+                                                "Délai_Moyen_Jours": "Axe X: Délai Moyen avant Rappel (Jours) ➡ Risque de Durée",
+                                                "Nb_Rappels": "Axe Y: Fréquence des Rappels ➡ Risque de Volume",
+                                                "Gravite_Moyenne": "Gravité Moyenne (Couleur)",
+                                                "Coût_Risque_Simulé": "Coût d'Exposition au Risque Simulé (k€)"
+                                            },
+                                            color_continuous_scale=px.colors.sequential.YlOrRd)
+                    
+                    if not avg_distrib.empty:
+                        fig_bubble.add_vline(x=avg_distrib['Délai_Moyen_Jours'].median(), line_dash="dash", line_color="#34495E")
+                        fig_bubble.add_hline(y=avg_distrib['Nb_Rappels'].median(), line_dash="dash", line_color="#34495E")
 
-            fig_bubble.update_layout(xaxis_range=[0, avg_distrib['Délai_Moyen_Jours'].max() * 1.1])
-            st.plotly_chart(fig_bubble, use_container_width=True)
-        else:
-            st.info("Données insuffisantes pour la matrice de risque distributeur.")
+                    fig_bubble.update_layout(xaxis_range=[0, avg_distrib['Délai_Moyen_Jours'].max() * 1.1])
+                    st.plotly_chart(fig_bubble, use_container_width=True)
+                else:
+                    st.info("Données insuffisantes pour la matrice de risque distributeur (après agrégation).")
     else:
         st.info("Colonnes de date de commercialisation et/ou distributeurs manquantes.")
         
@@ -499,30 +514,36 @@ with tab2:
         if not geo_counts.empty:
             
             # Pour simuler la carte de France (Choropleth), nous avons besoin d'un GeoJSON.
-            # Sans GeoJSON facilement chargeable dans cet environnement, nous utilisons une carte simplifiée:
             try:
                 # Si le fichier GeoJSON est disponible, on peut utiliser le Choropleth
-                fig_map = px.choropleth(geo_counts,
-                                        geojson=load_geojson(),
-                                        locations='zone_clean',
-                                        featureidkey="properties.code", # Clé correspondant au code dans le GeoJSON
-                                        color='Nombre_Rappels',
-                                        projection="mercator",
-                                        title="Répartition Géospatiale du Nombre de Rappels (par Code Département/Zone)",
-                                        color_continuous_scale="Plasma")
-                fig_map.update_geos(fitbounds="locations", visible=False)
-                st.plotly_chart(fig_map, use_container_width=True)
+                geojson_data = load_geojson()
+                if geojson_data:
+                    fig_map = px.choropleth(geo_counts,
+                                            geojson=geojson_data,
+                                            locations='zone_clean',
+                                            featureidkey="properties.code", # Clé correspondant au code dans le GeoJSON
+                                            color='Nombre_Rappels',
+                                            projection="mercator",
+                                            title="Répartition Géospatiale du Nombre de Rappels (par Code Département/Zone)",
+                                            color_continuous_scale="Plasma")
+                    fig_map.update_geos(fitbounds="locations", visible=False)
+                    st.plotly_chart(fig_map, use_container_width=True)
+                else:
+                    raise Exception("GeoJSON non chargé.") # Force la solution de repli
             except Exception:
                 # Solution de repli si le GeoJSON manque ou si la zone de vente est trop générique
-                st.warning("⚠️ Impossible de charger la carte Choropleth France (GeoJSON manquant). Affichage du Top 10 des zones.")
+                st.warning("⚠️ Impossible de charger la carte Choropleth France (GeoJSON manquant dans cet environnement). Affichage du Top 10 des zones.")
                 
                 top_zones = geo_counts.sort_values(by='Nombre_Rappels', ascending=False).head(10)
-                fig_fallback = px.bar(top_zones, x='Nombre_Rappels', y='zone_clean', orientation='h',
-                                      title="Top 10 : Zones de Vente les plus impactées",
-                                      labels={'zone_clean': 'Code Zone / Département (Extrait)', 'Nombre_Rappels': 'Nombre de Rappels'},
-                                      color='Nombre_Rappels', color_continuous_scale=px.colors.sequential.Sunset)
-                fig_fallback.update_layout(yaxis={'categoryorder':'total ascending'})
-                st.plotly_chart(fig_fallback, use_container_width=True)
+                if not top_zones.empty:
+                    fig_fallback = px.bar(top_zones, x='Nombre_Rappels', y='zone_clean', orientation='h',
+                                          title="Top 10 : Zones de Vente les plus impactées",
+                                          labels={'zone_clean': 'Code Zone / Département (Extrait)', 'Nombre_Rappels': 'Nombre de Rappels'},
+                                          color='Nombre_Rappels', color_continuous_scale=px.colors.sequential.Sunset)
+                    fig_fallback.update_layout(yaxis={'categoryorder':'total ascending'})
+                    st.plotly_chart(fig_fallback, use_container_width=True)
+                else:
+                    st.info("Données de zone géographique de vente insuffisantes pour la cartographie de repli.")
         else:
             st.info("Données de zone géographique de vente insuffisantes pour la cartographie.")
     else:
@@ -543,7 +564,7 @@ with tab3:
     col3.metric("Délai Moyen Commercialisation", vitesse_reponse)
     
     df_vol = df_filtered.groupby(df_filtered["date_publication"].dt.to_period("M")).size().reset_index(name="Rappels")
-    volatilite = df_vol["Rappels"].std() if not df_vol.empty else 0
+    volatilite = df_vol["Rappels"].std() if not df_vol.empty and len(df_vol) > 1 else 0
     col4.metric("Volatilité Mensuelle", f"{volatilite:.1f}")
     
     # NOUVEAU KPI 1 : Diversité des Risques
@@ -554,9 +575,7 @@ with tab3:
         col5.metric("Diversité des Risques", "N/A")
         
     # NOUVEAU KPI 2 : Risque Moyen Pondéré par Catégorie (RMPC) - Simulation
-    # Le RMPC est simulé ici comme la gravité moyenne des 3 principaux motifs
     if "motif_du_rappel" in df_filtered.columns and not df_filtered.empty:
-        # Reprendre l'IMR comme score de gravité
         df_temp_imr = df_filtered.copy()
         df_temp_imr["is_risque_grave"] = df_temp_imr["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
         df_temp_imr['score_gravite'] = np.where(df_temp_imr['is_risque_grave'], 2, 1)
@@ -575,37 +594,45 @@ with tab3:
     if "date_publication" in df_filtered.columns and "motif_du_rappel" in df_filtered.columns:
         
         df_trend = df_filtered.copy()
-        df_trend["Mois"] = df_trend["date_publication"].dt.to_period("M")
         
-        df_motifs = explode_column(df_trend, "motif_du_rappel")
-        df_motifs = df_motifs.reset_index().rename(columns={'index': 'original_index'})
-        df_motifs_merged = pd.merge(df_motifs, df_trend[['Mois']].reset_index().rename(columns={'index': 'original_index'}), on='original_index', how='left')
-        
-        motif_counts = df_motifs_merged.groupby(['Mois', 'motif_du_rappel']).size().reset_index(name='Rappels')
-        motif_counts['Rang'] = motif_counts.groupby('Mois')['Rappels'].rank(method='first', ascending=False)
-        
-        top_motifs_global = motif_counts['motif_du_rappel'].value_counts().head(5).index
-        df_rank = motif_counts[motif_counts['motif_du_rappel'].isin(top_motifs_global)].copy()
-        
-        df_rank['Mois'] = df_rank['Mois'].dt.to_timestamp()
-        
-        if not df_rank.empty:
-            fig_bump = px.line(df_rank, 
-                               x="Mois", 
-                               y="Rang", 
-                               color="motif_du_rappel", 
-                               line_shape='spline',
-                               markers=True,
-                               title="Évolution du Classement (Rang) des 5 Principaux Motifs de Rappel",
-                               labels={"Rang": "Classement (1 = Plus Fréquent)", "Mois": "Mois"},
-                               color_discrete_sequence=px.colors.qualitative.Dark24)
-            
-            fig_bump.update_yaxes(autorange="reversed", tickvals=[1, 2, 3, 4, 5], title="Classement (1 = le plus fréquent)")
-            fig_bump.update_traces(marker=dict(size=10))
-            
-            st.plotly_chart(fig_bump, use_container_width=True)
+        if df_trend.empty:
+            st.info("⚠️ Les données filtrées sont vides pour l'analyse des tendances.")
         else:
-            st.info("Données insuffisantes pour la Dérive des Causes Racines.")
+            df_trend["Mois"] = df_trend["date_publication"].dt.to_period("M")
+            
+            df_motifs = explode_column(df_trend, "motif_du_rappel")
+            
+            if not df_motifs.empty:
+                df_motifs = df_motifs.reset_index().rename(columns={'index': 'original_index'})
+                df_motifs_merged = pd.merge(df_motifs, df_trend[['Mois']].reset_index().rename(columns={'index': 'original_index'}), on='original_index', how='left')
+                
+                motif_counts = df_motifs_merged.groupby(['Mois', 'motif_du_rappel']).size().reset_index(name='Rappels')
+                motif_counts['Rang'] = motif_counts.groupby('Mois')['Rappels'].rank(method='first', ascending=False)
+                
+                top_motifs_global = motif_counts['motif_du_rappel'].value_counts().head(5).index
+                df_rank = motif_counts[motif_counts['motif_du_rappel'].isin(top_motifs_global)].copy()
+                
+                df_rank['Mois'] = df_rank['Mois'].dt.to_timestamp()
+                
+                if not df_rank.empty:
+                    fig_bump = px.line(df_rank, 
+                                       x="Mois", 
+                                       y="Rang", 
+                                       color="motif_du_rappel", 
+                                       line_shape='spline',
+                                       markers=True,
+                                       title="Évolution du Classement (Rang) des 5 Principaux Motifs de Rappel",
+                                       labels={"Rang": "Classement (1 = Plus Fréquent)", "Mois": "Mois"},
+                                       color_discrete_sequence=px.colors.qualitative.Dark24)
+                    
+                    fig_bump.update_yaxes(autorange="reversed", tickvals=[1, 2, 3, 4, 5], title="Classement (1 = le plus fréquent)")
+                    fig_bump.update_traces(marker=dict(size=10))
+                    
+                    st.plotly_chart(fig_bump, use_container_width=True)
+                else:
+                    st.info("Données insuffisantes pour la Dérive des Causes Racines.")
+            else:
+                 st.info("Données de motif de rappel insuffisantes après nettoyage.")
     else:
         st.info("Colonnes manquantes pour l'analyse des motifs.")
 
@@ -615,30 +642,35 @@ with tab3:
     if "categorie_de_produit" in df_filtered.columns and "risques_encourus" in df_filtered.columns:
         # Calcul du score de risque moyen par catégorie
         df_radar = df_filtered.copy()
-        df_radar['is_risque_grave'] = df_radar["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
-        df_radar['score_gravite'] = np.where(df_radar['is_risque_grave'], 2, 1)
-
-        cat_scores = df_radar.groupby('categorie_de_produit').agg(
-            RMPC=('score_gravite', 'mean'),
-            Frequence=('categorie_de_produit', 'count')
-        ).reset_index()
         
-        cat_scores['RMPC'] = cat_scores['RMPC'] * 10 # Remettre sur une échelle plus lisible (max 20)
-        
-        # Filtrer les 5 catégories les plus fréquentes pour lisibilité du radar
-        top_cats = cat_scores.sort_values(by='Frequence', ascending=False).head(5)
-        
-        if not top_cats.empty:
-            fig_radar = px.line_polar(top_cats, r='RMPC', theta='categorie_de_produit', line_close=True,
-                                      title="Profil de Risque Moyen Pondéré par Catégorie (RMPC)",
-                                      color_discrete_sequence=['#E67E22'])
-            fig_radar.update_traces(fill='toself')
-            fig_radar.update_layout(polar=dict(
-                radialaxis=dict(visible=True, range=[0, 20])
-            ))
-            st.plotly_chart(fig_radar, use_container_width=True)
+        # --- Point de contrôle critique pour le Radar Chart ---
+        if df_radar.empty:
+            st.info("⚠️ Les données filtrées sont vides. Ajustez les filtres pour générer le Profil de Risque (Radar Chart).")
         else:
-            st.info("Données insuffisantes pour le Profil de Risque (Radar Chart).")
+            df_radar['is_risque_grave'] = df_radar["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
+            df_radar['score_gravite'] = np.where(df_radar['is_risque_grave'], 2, 1)
+
+            cat_scores = df_radar.groupby('categorie_de_produit').agg(
+                RMPC=('score_gravite', 'mean'),
+                Frequence=('categorie_de_produit', 'count')
+            ).reset_index()
+            
+            cat_scores['RMPC'] = cat_scores['RMPC'] * 10 # Remettre sur une échelle plus lisible (max 20)
+            
+            # Filtrer les 5 catégories les plus fréquentes pour lisibilité du radar
+            top_cats = cat_scores.sort_values(by='Frequence', ascending=False).head(5)
+            
+            if not top_cats.empty:
+                fig_radar = px.line_polar(top_cats, r='RMPC', theta='categorie_de_produit', line_close=True,
+                                          title="Profil de Risque Moyen Pondéré par Catégorie (RMPC)",
+                                          color_discrete_sequence=['#E67E22'])
+                fig_radar.update_traces(fill='toself')
+                fig_radar.update_layout(polar=dict(
+                    radialaxis=dict(visible=True, range=[0, 20])
+                ))
+                st.plotly_chart(fig_radar, use_container_width=True)
+            else:
+                st.info("Données insuffisantes pour le Profil de Risque (Radar Chart) : aucune catégorie fréquente identifiée.")
     else:
          st.info("Données de risque et/ou de catégorie manquantes.")
 
