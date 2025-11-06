@@ -47,6 +47,7 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
             "motif_rappel": "motif_du_rappel",
             "numero_fiche": "reference_fiche",
             "lien_vers_la_fiche_rappel": "liens_vers_la_fiche_rappel",
+            "date_debut_commercialisation_produit": "date_debut_commercialisation", # Ajout pour robustesse
         }
         
         rename_dict = {old_name: new_name for old_name, new_name in column_mapping.items() if old_name in df.columns and old_name != new_name}
@@ -171,15 +172,6 @@ if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.c
         if risque_major:
             risque_principal = risque_major.title()
 
-# Taux de Risque Microbiologique
-taux_microbien = 0.0
-if "motif_du_rappel" in df_filtered.columns and total_rappels > 0:
-    microbien_count = df_filtered[df_filtered["motif_du_rappel"].str.contains("microbiologique|salmonelle|listeria|ecoli", case=False, na=False)].shape[0]
-    taux_microbien = (microbien_count / total_rappels * 100)
-    taux_microbien_str = f"{taux_microbien:.1f}%"
-else:
-    taux_microbien_str = "N/A"
-
 # % de Rappels graves
 risques_graves_keywords = "listeriose|salmonellose|e\.coli|blessures|allergene non declare|corps étranger"
 df_risques_grave = explode_column(df_filtered, "risques_encourus")
@@ -196,9 +188,13 @@ vitesse_reponse = "N/A"
 if "date_debut_commercialisation" in df_filtered.columns and not df_filtered["date_debut_commercialisation"].isnull().all():
     df_temp_dates = df_filtered.dropna(subset=["date_publication", "date_debut_commercialisation"]).copy()
     if not df_temp_dates.empty:
+        # Calcul : Date de publication - Date de début de commercialisation = Durée de la présence du produit sur le marché.
         df_temp_dates["duree_commercialisation"] = (df_temp_dates["date_publication"] - df_temp_dates["date_debut_commercialisation"]).dt.days
-        avg_days = df_temp_dates["duree_commercialisation"].mean()
-        vitesse_reponse = f"{avg_days:.1f} jours"
+        # Filtrer les valeurs négatives (erreurs de saisie)
+        df_temp_dates = df_temp_dates[df_temp_dates["duree_commercialisation"] >= 0]
+        if not df_temp_dates.empty:
+            avg_days = df_temp_dates["duree_commercialisation"].mean()
+            vitesse_reponse = f"{avg_days:.1f} jours"
     
 # Concentration du Risque Fournisseur - Pour Tab 2
 concentration_risque = "N/A"
@@ -225,9 +221,6 @@ with tab1:
     col1.metric("Total Rappels (Périmètre)", total_rappels)
     col2.metric("Marques Impactées", df_filtered["nom_marque_du_produit"].nunique() if "nom_marque_du_produit" in df.columns else 0)
     col3.metric("Risque Principal", risque_principal)
-    
-    # Nouvel Indicateur: Taux d'Aggravation du Risque (TAR)
-    # Proxy: % de rappels qui ont à la fois un motif 'non-conformité mineure' et un risque 'grave'
     col4.metric("% Rappels à Risque Grave", pc_risques_graves_str, help="Pourcentage des rappels liés à des risques sérieux (Listeria, Salmonelle, Allergènes non déclarés).")
 
 
@@ -258,19 +251,16 @@ with tab1:
             
             # Agrégation mensuelle
             df_month = df_trend.groupby(df_trend["date_publication"].dt.to_period("M")).size().reset_index(name="Total_Marché")
-            df_month["Total_Marché"] = df_month["Total_Marché"].cumsum()
-            
             df_marque_month = df_trend[df_trend["nom_marque_du_produit"] == marque].groupby(df_trend["date_publication"].dt.to_period("M")).size().reset_index(name=marque.title())
-            df_marque_month[marque.title()] = df_marque_month[marque.title()].cumsum()
 
             df_comp = pd.merge(df_month, df_marque_month, on="date_publication", how="outer").fillna(0)
             df_comp["date_publication"] = df_comp["date_publication"].dt.to_timestamp()
             
-            # Calcul du SoR cumulé
+            # Calcul du SoR
             df_comp[f"SoR_{marque.title()}"] = (df_comp[marque.title()] / df_comp["Total_Marché"]) * 100
             
             fig_trend = px.line(df_comp, x="date_publication", y=[f"SoR_{marque.title()}"], 
-                                title=f"Évolution du Share of Recall (SoR) cumulé pour {marque.title()}",
+                                title=f"Évolution Mensuelle du Share of Recall (SoR) pour {marque.title()}",
                                 labels={"value": "SoR (%)", "date_publication": "Mois"},
                                 color_discrete_sequence=['#FF4B4B'])
             st.plotly_chart(fig_trend, use_container_width=True)
@@ -280,18 +270,15 @@ with tab1:
     st.markdown("---")
     st.subheader("3. Corrélation : Matrice des Motifs vs. Risques")
     if "risques_encourus" in df_filtered.columns and "motif_du_rappel" in df_filtered.columns:
-        # Créer une matrice de cooccurrence simple
         df_corr = df_filtered.copy()
         df_corr["Motif_court"] = df_corr["motif_du_rappel"].str.split(r'[;.,]').str[0].str.strip()
         
-        # S'assurer que chaque ligne est une combinaison Risque-Motif
         df_exploded_motif_risque = df_corr.assign(risques_encourus=df_corr['risques_encourus'].str.split(';')).explode('risques_encourus')
         df_exploded_motif_risque['risques_encourus'] = df_exploded_motif_risque['risques_encourus'].str.strip()
         
         cooccurrence = df_exploded_motif_risque.groupby(['Motif_court', 'risques_encourus']).size().reset_index(name='Nombre')
         cooccurrence = cooccurrence[cooccurrence['Nombre'] > 0]
         
-        # Prendre les top 5 des deux côtés
         top_motifs_list = cooccurrence['Motif_court'].value_counts().head(5).index
         top_risques_list = cooccurrence['risques_encourus'].value_counts().head(5).index
         
@@ -330,7 +317,6 @@ with tab2:
         st.subheader("1. Risque Fournisseur : Top 10 Marques par Catégorie")
         col_name = "nom_marque_du_produit"
         if col_name in df_filtered.columns:
-            # Compter les occurrences de chaque marque dans la catégorie filtrée
             brand_category_counts = df_filtered.groupby(["nom_marque_du_produit", "categorie_de_produit"]).size().reset_index(name='Nombre_de_Rappels')
             top_10_brands = brand_category_counts.sort_values(by="Nombre_de_Rappels", ascending=False).head(10)
             
@@ -343,30 +329,36 @@ with tab2:
             st.info("Aucune donnée de marque/fournisseur exploitable.")
 
     with col_droite:
-        st.subheader("2. Tendance : Comparaison de la Fréquence de Rappel par Distributeur")
-        if distrib != "Toutes" and "date_publication" in df_filtered.columns:
-            df_trend = df.copy()
-            df_trend = df_trend[df_trend["date_publication"] >= df_filtered["date_publication"].min()]
-
-            # Total rappels du marché pour la période/catégorie
-            df_month_total = df_trend.groupby(df_trend["date_publication"].dt.to_period("M")).size().reset_index(name="Total_Marché")
+        st.subheader("2. Analyse de la Réactivité : Délai Moyen de Commercialisation avant Rappel")
+        
+        if "date_debut_commercialisation" in df_filtered.columns and "distributeurs" in df_filtered.columns:
             
-            # Rappels du distributeur sélectionné
-            df_month_distrib = df_trend[df_trend["distributeurs"].str.contains(distrib, case=False, na=False, regex=True)].groupby(df_trend["date_publication"].dt.to_period("M")).size().reset_index(name=distrib.title())
+            # 1. Joindre le distributeur aux données de dates
+            df_reponse = df_filtered.dropna(subset=["date_publication", "date_debut_commercialisation", "distributeurs"]).copy()
+            df_reponse = df_reponse.assign(distributeurs=df_reponse['distributeurs'].str.split(';')).explode('distributeurs')
+            df_reponse['distributeurs'] = df_reponse['distributeurs'].str.strip()
+            df_reponse = df_reponse[df_reponse['distributeurs'] != '']
             
-            df_comp = pd.merge(df_month_total, df_month_distrib, on="date_publication", how="outer").fillna(0)
-            df_comp["date_publication"] = df_comp["date_publication"].dt.to_timestamp()
+            # 2. Calculer le délai et filtrer les erreurs de saisie
+            df_reponse["Délai_Jours"] = (df_reponse["date_publication"] - df_reponse["date_debut_commercialisation"]).dt.days
+            df_reponse = df_reponse[df_reponse["Délai_Jours"] >= 0]
             
-            # Calcul de la Moyenne du Marché (pour comparaison)
-            df_comp["Moyenne du Marché"] = df_comp["Total_Marché"].mean() 
-
-            fig_trend = px.line(df_comp, x="date_publication", y=[distrib.title(), "Moyenne du Marché"], 
-                                title=f"Volume de Rappels de {distrib.title()} vs. Moyenne Marché (Période)",
-                                labels={"value": "Nombre de Rappels", "date_publication": "Mois"},
-                                color_discrete_map={distrib.title(): '#2ECC71', "Moyenne du Marché": '#E74C3C'})
-            st.plotly_chart(fig_trend, use_container_width=True)
+            # 3. Calculer la moyenne par Distributeur
+            avg_delay_distrib = df_reponse.groupby("distributeurs")["Délai_Jours"].mean().reset_index(name="Délai_Moyen_Jours")
+            
+            # 4. Afficher le top 10 des distributeurs avec le DÉLAI le plus LONG (le moins réactif)
+            top_10_distrib = avg_delay_distrib.sort_values(by="Délai_Moyen_Jours", ascending=False).head(10)
+            
+            if not top_10_distrib.empty:
+                fig_delay = px.bar(top_10_distrib, x="Délai_Moyen_Jours", y="distributeurs", orientation='h',
+                                   title="Délai moyen (jours) de présence du produit défectueux sur le marché (Top 10 Moins Réactifs)",
+                                   color='Délai_Moyen_Jours', color_continuous_scale=px.colors.sequential.YlOrRd)
+                fig_delay.update_layout(yaxis={'categoryorder':'total ascending'}, xaxis_title="Délai Moyen (Jours)")
+                st.plotly_chart(fig_delay, use_container_width=True)
+            else:
+                st.info("Données de réactivité incomplètes ou non disponibles pour la période filtrée.")
         else:
-            st.info("Sélectionnez un distributeur dans la sidebar pour l'analyse de tendance.")
+            st.info("Colonnes de date de commercialisation et/ou distributeurs manquantes dans le fichier CSV.")
 
 
 # ----------------------------------------------------------------------
@@ -378,11 +370,15 @@ with tab3:
     # --- KPI CONFORMITÉ ---
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Risque Principal (Focus)", risque_principal)
-    col2.metric("% Rappels Microbiologiques", taux_microbien_str)
-    col3.metric("% Rappels à Risque Grave", pc_risques_graves_str)
-    col4.metric("Vitesse de Réponse Moyenne (Proxy)", vitesse_reponse, help="Durée moyenne (en jours) entre la date de commercialisation et la date de publication du rappel. Un nombre faible = détection rapide.")
-
+    col2.metric("% Rappels Graves", pc_risques_graves_str)
+    col3.metric("Délai Moyen Commercialisation", vitesse_reponse, help="Durée moyenne (en jours) de présence du produit défectueux sur le marché avant le rappel. Un nombre faible = meilleure réactivité globale du marché.")
     
+    # Indicateur de Volatilité du Marché
+    df_vol = df_filtered.groupby(df_filtered["date_publication"].dt.to_period("M")).size().reset_index(name="Rappels")
+    volatilite = df_vol["Rappels"].std() if not df_vol.empty else 0
+    col4.metric("Volatilité Mensuelle (Écart-type)", f"{volatilite:.1f}", help="Écart-type du nombre de rappels par mois. Un nombre élevé signifie un marché imprévisible.")
+
+
     # --- GRAPHIQUES CONFORMITÉ ---
     st.markdown("### Analyse de Gravité et Volatilité du Marché")
     col_gauche, col_droite = st.columns(2)
@@ -391,14 +387,12 @@ with tab3:
         st.subheader("1. Corrélation : Risque vs. Catégorie (Analyse de Portefeuille)")
         if not df_risques_exploded.empty and "categorie_de_produit" in df_filtered.columns:
             
-            # Joindre les risques aux catégories originales (pour le filtre)
             df_temp_risques = df_filtered.assign(risques_encourus=df_filtered['risques_encourus'].str.split(';')).explode('risques_encourus')
             df_temp_risques['risques_encourus'] = df_temp_risques['risques_encourus'].str.strip()
 
             risque_cat_counts = df_temp_risques.groupby(['categorie_de_produit', 'risques_encourus']).size().reset_index(name='Nombre')
             risque_cat_counts = risque_cat_counts[risque_cat_counts['Nombre'] > 0]
             
-            # Filtrer les top 5 risques par catégorie
             top_risques_list = risque_cat_counts['risques_encourus'].value_counts().head(5).index
             risque_cat_filtered = risque_cat_counts[risque_cat_counts['risques_encourus'].isin(top_risques_list)]
 
@@ -437,7 +431,7 @@ st.markdown("---")
 
 # --- 6. TABLEAU DE DONNÉES DÉTAILLÉ (NETTOYAGE DU MVP) ---
 with st.expander("🔍 Registre Détaillé des Rappels (Filtré)"):
-    display_cols = [c for c in ["reference_fiche", "date_publication", "categorie_de_produit", "nom_marque_du_produit", "motif_du_rappel", "risques_encourus", "distributeurs", "zone_geographique_de_vente", "liens_vers_la_fiche_rappel"] if c in df_filtered.columns]
+    display_cols = [c for c in ["reference_fiche", "date_publication", "date_debut_commercialisation", "categorie_de_produit", "nom_marque_du_produit", "motif_du_rappel", "risques_encourus", "distributeurs", "zone_geographique_de_vente", "liens_vers_la_fiche_rappel"] if c in df_filtered.columns]
     
     st.dataframe(df_filtered[display_cols].sort_values(by="date_publication", ascending=False).reset_index(drop=True), use_container_width=True)
 
