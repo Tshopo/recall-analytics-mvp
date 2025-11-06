@@ -267,12 +267,11 @@ if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.c
     if not risque_counts.empty:
         risque_major = next(iter(risque_counts.index), None)
         if risque_major:
-            # --- MODIFICATION ICI : Tronque le texte si "Listeria Monocytogenes" est présent ---
+            # Tronque le texte si "Listeria Monocytogenes" est présent
             if "listeria monocytogenes" in risque_major.lower():
                 risque_principal = "Listeria Monocytogenes"
             else:
                 risque_principal = risque_major.title()
-            # --- FIN MODIFICATION ---
     
 # Vitesse de Réponse Moyenne (Proxy)
 vitesse_reponse = "N/A"
@@ -343,15 +342,20 @@ with tab1:
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     with col1:
-        st.metric("Total Rappels (Périmètre)", total_rappels)
+        st.metric("Total Rappels (Périmètre)", total_rappels, 
+            help="Nombre total de fiches de rappel publiées, tenant compte de la période et des filtres sélectionnés.")
     with col2:
-        st.metric("IMR de la Marque", f"{imr_marque:.2f}")
+        st.metric("IMR de la Marque", f"{imr_marque:.2f}",
+            help="Indice de Maîtrise du Risque (IMR). Formule : (Somme des Scores de Gravité / Nbre total de rappels) * 10. (Gravité = 2 pour risque grave, 1 pour risque mineur). Échelle 0-20.")
     with col3:
-        st.metric("IMR du Marché", f"{imr_marche_comp:.2f}")
+        st.metric("IMR du Marché", f"{imr_marche_comp:.2f}",
+            help="Indice de Maîtrise du Risque (IMR) calculé sur l'ensemble des marques dans la période filtrée. Permet le benchmark.")
     with col4:
-        st.metric("Coût Implicite", f"{cout_marque:,.0f} €")
+        st.metric("Coût Implicite", f"{cout_marque:,.0f} €",
+            help="Coût de rappel simulé. Formule : (Nbre Rappels Graves x 50.000 €) + (Nbre Rappels Mineurs x 5.000 €).")
     with col5:
-        st.metric("Risque Principal", risque_principal)
+        st.metric("Risque Principal", risque_principal,
+            help="Le risque encouru (ex: Listeria, Corps étranger) le plus fréquemment mentionné dans les rappels filtrés.")
     
     # NOUVEAU KPI: Taux de Non-Conformité Fournisseur (NCF)
     if 'identifiant_de_l_etablissement_d_ou_provient_le_produit' in df_filtered.columns:
@@ -364,7 +368,7 @@ with tab1:
     with col6:
         if total_fournisseurs_t1 > 0 and 'identifiant_de_l_etablissement_d_ou_provient_le_produit' in df_filtered.columns:
             taux_ncf = (total_fournisseurs_impactes / total_fournisseurs_t1) * 100
-            st.metric("NCF T1 (Simulé)", f"{taux_ncf:.1f}%", help="Taux de Non-Conformité Fournisseur : % des fournisseurs T1 impliqués dans au moins 1 rappel.")
+            st.metric("NCF T1 (Simulé)", f"{taux_ncf:.1f}%", help="Taux de Non-Conformité Fournisseur : (Nbre de Fournisseurs T1 impliqués / Nbre Total Fournisseurs T1 Simulés (30)) * 100.")
         else:
             st.metric("NCF T1 (Simulé)", "N/A", help="Données d'identification fournisseur manquantes pour le calcul précis.")
 
@@ -493,13 +497,17 @@ with tab2:
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     with col1:
-        st.metric("Total Rappels (Filtré)", total_rappels)
+        st.metric("Total Rappels (Filtré)", total_rappels,
+            help="Nombre total de fiches de rappel publiées, tenant compte de la période et des filtres sélectionnés.")
     with col2:
-        st.metric("Délai Moyen (Marché)", vitesse_reponse)
+        st.metric("Délai Moyen (Marché)", vitesse_reponse,
+            help="Vitesse de Réponse (Proxy). Formule : Moyenne des (Date de Publication du rappel - Date Début Commercialisation) en jours.")
     with col3:
-        st.metric("Coût Logistique Max/Distributeur", f"{COUT_LOGISTIQUE_JOUR_SUPP:,.0f} € / Jour")
+        st.metric("Coût Logistique Max/Distributeur", f"{COUT_LOGISTIQUE_JOUR_SUPP:,.0f} € / Jour",
+            help="Coût simulé d'un jour d'exposition au risque logistique par rappel. Utilisé pour la matrice de risque distributeur.")
     with col4:
-        st.metric("% Rappels à Risque Grave", pc_risques_graves_str)
+        st.metric("% Rappels à Risque Grave", pc_risques_graves_str,
+            help="Proportion des rappels dont le risque encouru est jugé grave (ex: micro-organismes pathogènes, corps étrangers, allergènes non déclarés).")
     
     # NOUVEAU KPI 1 : Densité Distributeurs
     with col5:
@@ -507,14 +515,16 @@ with tab2:
             df_distrib_exploded = explode_column(df_filtered, 'distributeurs')
             distrib_counts = df_distrib_exploded['distributeurs'].value_counts()
             densite_distrib = distrib_counts.mean() if not distrib_counts.empty else 0.0
-            st.metric("Densité Moy. Rappel/Distributeur", f"{densite_distrib:.1f}")
+            st.metric("Densité Moy. Rappel/Distributeur", f"{densite_distrib:.1f}",
+                help="Mesure la fréquence moyenne des rappels par distributeur unique impliqué. Formule : Total Rappels (Filtré) / Nombre de Distributeurs Uniques Impliqués.")
         else:
-            st.metric("Densité Moy. Rappel/Distributeur", "N/A")
+            st.metric("Densité Moy. Rappel/Distributeur", "N/A",
+                help="Mesure la fréquence moyenne des rappels par distributeur unique impliqué. Formule : Total Rappels (Filtré) / Nombre de Distributeurs Uniques Impliqués.")
         
     # NOUVEAU KPI 2 : Taux de Couverture du Rappel (TCR) (Simulé)
     with col6:
         taux_couverture_rappel = 85.0
-        st.metric("Taux de Couverture du Rappel (Simulé)", f"{taux_couverture_rappel:.1f}%", help="KPI Simulé : % des zones géographiques couvertes par une action de retrait documentée (cible : 95%).")
+        st.metric("Taux de Couverture du Rappel (Simulé)", f"{taux_couverture_rappel:.1f}%", help="KPI Simulé : Pourcentage des zones géographiques couvertes par une action de retrait documentée (cible : 95%).")
 
 
     st.markdown("### 1. Matrice de Priorisation du Risque Distributeur (Bubble Chart)")
@@ -672,24 +682,30 @@ with tab3:
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     with col1:
-        st.metric("Risque Principal", risque_principal)
+        st.metric("Risque Principal", risque_principal,
+            help="Le risque encouru (ex: Listeria, Corps étranger) le plus fréquemment mentionné dans les rappels filtrés.")
     with col2:
-        st.metric("% Rappels Graves", pc_risques_graves_str)
+        st.metric("% Rappels Graves", pc_risques_graves_str,
+            help="Proportion des rappels dont le risque encouru est jugé grave (ex: micro-organismes pathogènes, corps étrangers, allergènes non déclarés).")
     with col3:
-        st.metric("Délai Moyen Commercialisation", vitesse_reponse)
+        st.metric("Délai Moyen Commercialisation", vitesse_reponse,
+            help="Vitesse de Réponse (Proxy). Formule : Moyenne des (Date de Publication du rappel - Date Début Commercialisation) en jours.")
     
     with col4:
         df_vol = df_filtered.groupby(df_filtered["date_publication"].dt.to_period("M")).size().reset_index(name="Rappels")
         volatilite = df_vol["Rappels"].std() if not df_vol.empty and len(df_vol) > 1 else 0
-        st.metric("Volatilité Mensuelle", f"{volatilite:.1f}")
+        st.metric("Volatilité Mensuelle", f"{volatilite:.1f}",
+            help="Écart-type (STD) du nombre de rappels publiés chaque mois sur la période filtrée. Mesure l'instabilité du volume de rappels.")
     
     # NOUVEAU KPI 1 : Diversité des Risques
     with col5:
         if not df_risques_exploded.empty:
             diversite_risques = df_risques_exploded['risques_encourus'].nunique()
-            st.metric("Diversité des Risques", diversite_risques, help="Nombre de types de risques encourus différents identifiés dans la période (e.g. Bactérie, Physique, Allergène).")
+            st.metric("Diversité des Risques", diversite_risques, 
+                help="Nombre de types de risques encourus différents identifiés (e.g. Bactérie, Physique, Allergène) dans la période.")
         else:
-            st.metric("Diversité des Risques", "N/A")
+            st.metric("Diversité des Risques", "N/A", 
+                help="Nombre de types de risques encourus différents identifiés (e.g. Bactérie, Physique, Allergène) dans la période.")
         
     # NOUVEAU KPI 2 : Risque Moyen Pondéré par Catégorie (RMPC) - Simulation
     with col6:
@@ -704,7 +720,7 @@ with tab3:
             rmpc = top_motifs_graves['score_gravite'].mean() * 10 if not top_motifs_graves.empty else 0.0
             st.metric("RMPC (Simulé)", f"{rmpc:.2f}", help="Risque Moyen Pondéré par Catégorie : Gravité moyenne des motifs principaux (échelle de 0 à 20).")
         else:
-            st.metric("RMPC (Simulé)", "N/A")
+            st.metric("RMPC (Simulé)", "N/A", help="Risque Moyen Pondéré par Catégorie : Gravité moyenne des motifs principaux (échelle de 0 à 20).")
 
 
     st.markdown("### 1. Tendance : Dérive des Causes Racines (DCR) - Taux d'Émergence des Motifs")
