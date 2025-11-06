@@ -4,15 +4,22 @@ import plotly.express as px
 import os 
 from datetime import datetime
 import numpy as np
+from collections import defaultdict
+
+# --- 0. SIMULATION DES COUTS STRATEGIQUES (EN DUR) ---
+# Ces valeurs sont des estimations de coûts internes simulées pour la stratégie.
+COUT_RAPPEl_GRAVE_UNITAIRE = 50000.0  # Coût estimé d'un rappel impliquant un risque grave (Listeria, Salmonelle)
+COUT_RAPPEl_MINEUR_UNITAIRE = 5000.0   # Coût estimé d'un rappel mineur (défaut d'étiquetage simple)
+COUT_LOGISTIQUE_JOUR_SUPP = 500.0      # Coût logistique / jour pour chaque distributeur après le délai "normal"
+SEUIL_IMR_ALERTE = 10.0                # Seuil à partir duquel un IMR est considéré critique
 
 # --- 1. CONFIGURATION ET MISE EN PAGE GLOBALE ---
-# Utilisation d'une palette de couleurs cohérente et un layout large
-st.set_page_config(page_title="Recall Analytics (RappelConso) - B2B PRO", layout="wide", initial_sidebar_state="expanded")
-st.title("🛡️ Recall Analytics — Dashboard d'Intelligence Marché (B2B PRO)")
+st.set_page_page_config(page_title="Recall Analytics (RappelConso) - B2B PRO", layout="wide", initial_sidebar_state="expanded")
+st.title("🛡️ Recall Analytics — Dashboard d'Intelligence Marché (B2B PRO) - Vue Stratégie DS")
 
 st.markdown("""
 **Prototype de plateforme SaaS B2B** exploitant les données de RappelConso pour l'analyse des risques et le benchmarking concurrentiel. 
-**Objectif :** Fournir des insights actionnables sur la fréquence, la gravité et l'exposition géographique des rappels.
+**Focus DS :** Intégration des **Coûts Stratégiques Simulé** et des indicateurs prospectifs (IMR, Matrice de Risque Distributeur, DCR).
 """)
 
 st.markdown("---")
@@ -30,7 +37,6 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
     df = pd.DataFrame()
     
     try:
-        # Tente avec le point-virgule (FR), puis la virgule
         try:
             df = pd.read_csv(file_path, sep=";", encoding='utf-8')
             if df.shape[1] <= 1:
@@ -41,7 +47,6 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
         if df.empty or df.shape[1] <= 1:
             raise ValueError("Le fichier ne contient pas de données.")
             
-        # --- STANDARDISATION DES NOMS DE COLONNES (POUR LA STABILITÉ) ---
         column_mapping = {
             "categorie_produit": "categorie_de_produit",
             "marque_produit": "nom_marque_du_produit",
@@ -61,7 +66,6 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
             st.error(f"⚠️ Alerte Colonnes : Le script ne trouve pas les colonnes nécessaires : **{', '.join(missing_cols)}**.")
             st.stop()
             
-        # 1. Conversion de la date
         if "date_publication" in df.columns:
             df["date_publication"] = pd.to_datetime(df["date_publication"], errors="coerce", utc=True)
             df = df.sort_values(by="date_publication", ascending=False) 
@@ -69,7 +73,6 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
         if "date_debut_commercialisation" in df.columns:
             df["date_debut_commercialisation"] = pd.to_datetime(df["date_debut_commercialisation"], errors="coerce", utc=True)
 
-        # 2. Nettoyage des colonnes multi-valeurs
         for col in ["distributeurs", "zone_geographique_de_vente", "risques_encourus", "motif_du_rappel", "categorie_de_produit", "nom_marque_du_produit"]:
             if col in df.columns:
                 df[col] = (df[col].astype(str)
@@ -113,7 +116,6 @@ def safe_filter_list(df_source, col_name, exploded=False):
         return ["Toutes"] + sorted(list(set(valid_list)))
     
     return ["Toutes"]
-
 
 # --- 3. CHARGEMENT ET FILTRES GLOBAUX ---
 df = load_data_from_csv()
@@ -164,6 +166,10 @@ if distrib != "Toutes" and "distributeurs" in df_filtered.columns:
 total_rappels = len(df_filtered)
 df_risques_exploded = explode_column(df_filtered, "risques_encourus")
 
+# Définition des risques graves (pour les calculs financiers)
+risques_graves_keywords = "listeriose|salmonellose|e\.coli|blessures|allergene non declare|corps étranger"
+df_filtered["is_risque_grave"] = df_filtered["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
+
 # Risque principal
 risque_principal = "N/A"
 if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.columns:
@@ -174,17 +180,15 @@ if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.c
             risque_principal = risque_major.title()
 
 # % de Rappels graves
-risques_graves_keywords = "listeriose|salmonellose|e\.coli|blessures|allergene non declare|corps étranger"
-df_risques_grave = explode_column(df_filtered, "risques_encourus")
 pc_risques_graves = 0.0
-if not df_risques_grave.empty and total_rappels > 0:
-    count_graves = df_risques_grave[df_risques_grave["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)].shape[0]
+if total_rappels > 0:
+    count_graves = df_filtered["is_risque_grave"].sum()
     pc_risques_graves = (count_graves / total_rappels * 100)
     pc_risques_graves_str = f"{pc_risques_graves:.1f}%"
 else:
     pc_risques_graves_str = "N/A"
 
-# Vitesse de Réponse Moyenne (Proxy) - Pour Tab 3
+# Vitesse de Réponse Moyenne (Proxy)
 vitesse_reponse = "N/A"
 if "date_debut_commercialisation" in df_filtered.columns and not df_filtered["date_debut_commercialisation"].isnull().all():
     df_temp_dates = df_filtered.dropna(subset=["date_publication", "date_debut_commercialisation"]).copy()
@@ -195,13 +199,46 @@ if "date_debut_commercialisation" in df_filtered.columns and not df_filtered["da
             avg_days = df_temp_dates["duree_commercialisation"].mean()
             vitesse_reponse = f"{avg_days:.1f} jours"
     
-# Concentration du Risque Fournisseur - Pour Tab 2
-concentration_risque = "N/A"
-if "nom_marque_du_produit" in df_filtered.columns and total_rappels > 0:
-    top_5_marques = df_filtered["nom_marque_du_produit"].value_counts().nlargest(5)
-    if not top_5_marques.empty:
-        concentration = top_5_marques.sum() / total_rappels * 100
-        concentration_risque = f"{concentration:.1f}%"
+# --- NOUVEL INDICATEUR STRATEGIQUE : Indice de Maturité du Rappel (IMR) ---
+def calculate_imr(df_calc):
+    if df_calc.empty:
+        return 0.0, 0.0
+
+    df_imr = df_calc.copy()
+    
+    # 1. Calcul du Score de Gravité pour chaque rappel
+    df_imr['score_gravite'] = np.where(df_imr['is_risque_grave'], 2, 1) # Risque grave = poids 2, mineur = poids 1
+    
+    # 2. Calcul du nombre total de rappels (non uniques, pour la fréquence)
+    total_rappels_period = len(df_imr)
+    
+    # 3. Calcul du coût implicite (pour l'affichage financier)
+    df_imr['cout_implicite'] = np.where(df_imr['is_risque_grave'], COUT_RAPPEl_GRAVE_UNITAIRE, COUT_RAPPEl_MINEUR_UNITAIRE)
+    
+    # 4. Calcul de l'IMR (pondéré)
+    total_score = df_imr['score_gravite'].sum()
+    
+    # Formule simplifiée pour IMR : Score Pondéré / Fréquence
+    if total_rappels_period > 0:
+        imr = (total_score / total_rappels_period) * 10 
+    else:
+        imr = 0.0
+        
+    total_cout = df_imr['cout_implicite'].sum()
+
+    return imr, total_cout
+
+# Calcul de l'IMR pour la marque filtrée
+imr_marque, cout_marque = calculate_imr(df_filtered)
+
+# Calcul de l'IMR pour l'ensemble du marché (période filtrée)
+imr_marche, _ = calculate_imr(df_filtered.copy()) # Ici, df_filtered est déjà le "marché" si pas de marque filtrée.
+# Pour simuler le marché, si une marque est filtrée, on calcule sur toute la période filtrée mais sur toutes les marques
+if marque != "Toutes":
+    df_marche_comp = df[df["date_publication"] >= df_filtered["date_publication"].min()]
+    imr_marche_comp, _ = calculate_imr(df_marche_comp)
+else:
+    imr_marche_comp = imr_marche
 
 
 # --- 5. STRUCTURE DU TABLEAU DE BORD PAR ACTEUR (TABS) ---
@@ -210,7 +247,7 @@ tab1, tab2, tab3 = st.tabs(["🏭 Fabricants & Marques", "🛒 Distributeurs & R
 
 
 # ----------------------------------------------------------------------
-# TAB 1: FABRICANTS & MARQUES (BENCHMARKING)
+# TAB 1: FABRICANTS & MARQUES (BENCHMARKING IMR)
 # ----------------------------------------------------------------------
 with tab1:
     st.header("🎯 Intelligence Concurrentielle & Maîtrise du Risque Fournisseur")
@@ -218,17 +255,16 @@ with tab1:
     # --- KPI FABRICANT ---
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total Rappels (Périmètre)", total_rappels)
-    col2.metric("Marques Impactées", df_filtered["nom_marque_du_produit"].nunique() if "nom_marque_du_produit" in df.columns else 0)
-    col3.metric("Risque Principal", risque_principal)
-    col4.metric("% Rappels à Risque Grave", pc_risques_graves_str, help="Pourcentage des rappels liés à des risques sérieux (Listeria, Salmonelle, Allergènes non déclarés).")
+    col2.metric("Risque Principal", risque_principal)
+    col3.metric("IMR de la Marque (Simulé)", f"{imr_marque:.2f}", help="Indice de Maturité du Rappel : Score de gravité (2x Grave + 1x Mineur) pondéré. Seuil d'alerte : 10.0.")
+    col4.metric("Coût Implicite (Simulé)", f"{cout_marque:,.0f} €", help="Estimation du coût financier total des rappels (simulé en dur).")
 
-
-    # --- GRAPHIQUES FABRICANT ---
     st.markdown("### Analyse de Positionnement et Causes Racines")
     col_gauche, col_droite = st.columns(2)
 
     with col_gauche:
         st.subheader("1. Benchmark : Part de Rappel par Marque (SoR)")
+        # ... (Le code du SoR reste inchangé)
         if "nom_marque_du_produit" in df_filtered.columns and total_rappels > 0:
             top_marques = df_filtered["nom_marque_du_produit"].value_counts(normalize=True).mul(100).reset_index().rename(columns={
                 "nom_marque_du_produit": "Marque", 
@@ -243,31 +279,51 @@ with tab1:
             st.info("Aucune donnée pour le benchmarking des marques.")
 
     with col_droite:
-        st.subheader("2. Tendance : SoR de la Marque vs. Marché")
+        st.subheader("2. Tendance : IMR de la Marque vs. Marché (Courbe de Contrôle)")
         if marque != "Toutes" and "date_publication" in df_filtered.columns:
+            
+            # Calcul IMR mensuel pour la marque et le marché
             df_trend = df.copy()
             df_trend = df_trend[df_trend["date_publication"] >= df_filtered["date_publication"].min()]
-            
-            # Agrégation mensuelle
-            df_month = df_trend.groupby(df_trend["date_publication"].dt.to_period("M")).size().reset_index(name="Total_Marché")
-            df_marque_month = df_trend[df_trend["nom_marque_du_produit"] == marque].groupby(df_trend["date_publication"].dt.to_period("M")).size().reset_index(name=marque.title())
+            df_trend["Mois"] = df_trend["date_publication"].dt.to_period("M")
 
-            df_comp = pd.merge(df_month, df_marque_month, on="date_publication", how="outer").fillna(0)
-            df_comp["date_publication"] = df_comp["date_publication"].dt.to_timestamp()
+            def compute_imr_per_month(df_input):
+                df_input['is_risque_grave'] = df_input["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
+                df_input['score_gravite'] = np.where(df_input['is_risque_grave'], 2, 1)
+                
+                imr_monthly = df_input.groupby('Mois').agg(
+                    Total_Score=('score_gravite', 'sum'),
+                    Total_Rappels=('score_gravite', 'count')
+                ).reset_index()
+                
+                imr_monthly['IMR'] = (imr_monthly['Total_Score'] / imr_monthly['Total_Rappels']) * 10
+                imr_monthly['Mois'] = imr_monthly['Mois'].dt.to_timestamp()
+                return imr_monthly[['Mois', 'IMR']]
+
+            df_imr_marque = compute_imr_per_month(df_trend[df_trend["nom_marque_du_produit"] == marque])
+            df_imr_marche = compute_imr_per_month(df_trend)
+            df_imr_marche = df_imr_marche.rename(columns={'IMR': 'IMR_Marché'})
             
-            # Calcul du SoR
-            df_comp[f"SoR_{marque.title()}"] = (df_comp[marque.title()] / df_comp["Total_Marché"]) * 100
+            df_comp = pd.merge(df_imr_marque.rename(columns={'IMR': f'IMR_{marque.title()}'}), df_imr_marche, on='Mois', how='outer').fillna(0)
             
-            fig_trend = px.line(df_comp, x="date_publication", y=[f"SoR_{marque.title()}"], 
-                                title=f"Évolution Mensuelle du Share of Recall (SoR) pour {marque.title()}",
-                                labels={"value": "SoR (%)", "date_publication": "Mois"},
-                                color_discrete_sequence=['#FF4B4B'])
+            fig_trend = px.line(df_comp, x="Mois", y=[f"IMR_{marque.title()}", "IMR_Marché"], 
+                                title=f"Évolution Mensuelle de l'IMR : {marque.title()} vs. Marché (Seuil Alerte {SEUIL_IMR_ALERTE})",
+                                labels={"value": "IMR (Score Pondéré)", "Mois": "Mois"},
+                                color_discrete_map={f'IMR_{marque.title()}': '#2C3E50', 'IMR_Marché': '#BDC3C7'},
+                                line_shape='spline', markers=True)
+            
+            # Ajout du seuil d'alerte critique
+            fig_trend.add_hline(y=SEUIL_IMR_ALERTE, line_dash="dot", line_color="red", 
+                                annotation_text="Seuil Alerte IMR", 
+                                annotation_position="top right")
+
             st.plotly_chart(fig_trend, use_container_width=True)
         else:
-            st.info("Sélectionnez une marque dans la sidebar pour afficher la tendance SoR.")
+            st.info("Sélectionnez une marque dans la sidebar pour afficher l'IMR et la tendance.")
 
     st.markdown("---")
     st.subheader("3. Corrélation : Matrice des Motifs vs. Risques")
+    # ... (Le code du Heatmap reste inchangé)
     if "risques_encourus" in df_filtered.columns and "motif_du_rappel" in df_filtered.columns:
         df_corr = df_filtered.copy()
         df_corr["Motif_court"] = df_corr["motif_du_rappel"].str.split(r'[;.,]').str[0].str.strip()
@@ -296,7 +352,7 @@ with tab1:
 
 
 # ----------------------------------------------------------------------
-# TAB 2: DISTRIBUTEURS & RETAILERS (CANAL)
+# TAB 2: DISTRIBUTEURS & RETAILERS (MATRICE DE RISQUE LOGISTIQUE)
 # ----------------------------------------------------------------------
 with tab2:
     st.header("🛒 Analyse du Canal de Distribution & Risque Fournisseur")
@@ -304,74 +360,69 @@ with tab2:
     # --- KPI DISTRIBUTEUR ---
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total Rappels (Filtré)", total_rappels)
-    col2.metric("Nombre de Marques Impactées", df_filtered["nom_marque_du_produit"].nunique() if "nom_marque_du_produit" in df.columns else 0)
-    col3.metric("Zone de Vente la Plus Sensible", explode_column(df_filtered, "zone_geographique_de_vente")["zone_geographique_de_vente"].mode()[0].title() if not explode_column(df_filtered, "zone_geographique_de_vente").empty else "N/A")
-    col4.metric("Concentration Risque Fournisseur (Top 5)", concentration_risque, help="Pourcentage des rappels provenant des 5 marques les plus problématiques.")
+    col2.metric("Délai Moyen (Marché)", vitesse_reponse)
+    col3.metric("Coût Logistique Max/Distributeur (Simulé)", f"{COUT_LOGISTIQUE_JOUR_SUPP:,.0f} € / Jour", help="Coût logistique journalier estimé pour la gestion des stocks à retirer.")
+    col4.metric("% Rappels à Risque Grave", pc_risques_graves_str)
 
     # --- GRAPHIQUES DISTRIBUTEUR ---
-    st.markdown("### Évaluation du Risque Fournisseur et Exposition")
-    col_gauche, col_droite = st.columns(2)
-
-    with col_gauche:
-        st.subheader("1. Risque Fournisseur : Top 10 Marques par Catégorie")
-        col_name = "nom_marque_du_produit"
-        if col_name in df_filtered.columns:
-            brand_category_counts = df_filtered.groupby(["nom_marque_du_produit", "categorie_de_produit"]).size().reset_index(name='Nombre_de_Rappels')
-            top_10_brands = brand_category_counts.sort_values(by="Nombre_de_Rappels", ascending=False).head(10)
+    st.markdown("### Matrice de Priorisation du Risque Distributeur (Bubble Chart)")
+    
+    if "date_debut_commercialisation" in df_filtered.columns and "distributeurs" in df_filtered.columns:
             
-            fig_brands = px.bar(top_10_brands, x="Nombre_de_Rappels", y="nom_marque_du_produit", orientation='h', 
-                                title="Top 10 Marques associées aux rappels (dans la catégorie sélectionnée)",
-                                color='categorie_de_produit', color_discrete_sequence=px.colors.qualitative.Bold)
-            fig_brands.update_layout(yaxis={'categoryorder':'total ascending'}, yaxis_title="Marque")
-            st.plotly_chart(fig_brands, use_container_width=True)
-        else:
-            st.info("Aucune donnée de marque/fournisseur exploitable.")
-
-    with col_droite:
-        st.subheader("2. Analyse de la Réactivité : Délai Moyen de Commercialisation avant Rappel")
+        # 1. Joindre le distributeur aux données de dates
+        df_reponse = df_filtered.dropna(subset=["date_publication", "date_debut_commercialisation", "distributeurs"]).copy()
+        df_reponse = df_reponse.assign(distributeurs=df_reponse['distributeurs'].str.split(';')).explode('distributeurs')
+        df_reponse['distributeurs'] = df_reponse['distributeurs'].str.strip()
+        df_reponse = df_reponse[df_reponse['distributeurs'] != '']
         
-        if "date_debut_commercialisation" in df_filtered.columns and "distributeurs" in df_filtered.columns:
+        # 2. Calculer le Délai et la Gravité
+        df_reponse["Délai_Jours"] = (df_reponse["date_publication"] - df_reponse["date_debut_commercialisation"]).dt.days
+        df_reponse = df_reponse[df_reponse["Délai_Jours"] >= 0]
+        df_reponse['Score_Gravite'] = np.where(df_reponse['is_risque_grave'], 2, 1) # 2x plus important si Grave
+        
+        # 3. Agrégation par Distributeur
+        avg_distrib = df_reponse.groupby("distributeurs").agg(
+            Délai_Moyen_Jours=('Délai_Jours', 'mean'),
+            Nb_Rappels=('Délai_Jours', 'count'),
+            Gravite_Moyenne=('Score_Gravite', 'mean')
+        ).reset_index()
+        
+        # 4. Calcul du Coût d'Exposition au Risque (Taille de la bulle)
+        # Simulation: Délai * (Nb_Rappels * Coût Logistique Jour * Gravité)
+        avg_distrib['Coût_Risque_Simulé'] = avg_distrib['Délai_Moyen_Jours'] * avg_distrib['Nb_Rappels'] * avg_distrib['Gravite_Moyenne'] * COUT_LOGISTIQUE_JOUR_SUPP / 1000 # Divisé par 1000 pour taille lisible
+        
+        # 5. Création de la Matrice (Bubble Chart)
+        if not avg_distrib.empty:
+            fig_bubble = px.scatter(avg_distrib, 
+                                    x="Délai_Moyen_Jours", 
+                                    y="Nb_Rappels", 
+                                    size="Coût_Risque_Simulé", 
+                                    color="Gravite_Moyenne",
+                                    hover_name="distributeurs",
+                                    size_max=40,
+                                    title="Matrice de Priorisation du Risque Distributeur (Coût Logistique/Jours Simulé)",
+                                    labels={
+                                        "Délai_Moyen_Jours": "Axe X: Délai Moyen avant Rappel (Jours) ➡ Risque de Durée",
+                                        "Nb_Rappels": "Axe Y: Fréquence des Rappels ➡ Risque de Volume",
+                                        "Gravite_Moyenne": "Gravité Moyenne (Couleur)",
+                                        "Coût_Risque_Simulé": "Coût d'Exposition au Risque Simulé (k€)"
+                                    },
+                                    color_continuous_scale=px.colors.sequential.YlOrRd)
             
-            # 1. Joindre le distributeur aux données de dates
-            df_reponse = df_filtered.dropna(subset=["date_publication", "date_debut_commercialisation", "distributeurs"]).copy()
-            df_reponse = df_reponse.assign(distributeurs=df_reponse['distributeurs'].str.split(';')).explode('distributeurs')
-            df_reponse['distributeurs'] = df_reponse['distributeurs'].str.strip()
-            df_reponse = df_reponse[df_reponse['distributeurs'] != '']
-            
-            # 2. Calculer le délai et filtrer les erreurs de saisie
-            df_reponse["Délai_Jours"] = (df_reponse["date_publication"] - df_reponse["date_debut_commercialisation"]).dt.days
-            df_reponse = df_reponse[df_reponse["Délai_Jours"] >= 0]
-            
-            # 3. Calculer la moyenne par Distributeur
-            avg_delay_distrib = df_reponse.groupby("distributeurs")["Délai_Jours"].mean().reset_index(name="Délai_Moyen_Jours")
-            
-            # 4. Afficher le top 10 des distributeurs avec le DÉLAI le plus LONG (le moins réactif)
-            top_10_distrib = avg_delay_distrib.sort_values(by="Délai_Moyen_Jours", ascending=False).head(10)
-            
-            if not top_10_distrib.empty:
-                # --- AMÉLIORATION DE LA VISUALISATION ---
-                fig_delay = px.bar(top_10_distrib, x="Délai_Moyen_Jours", y="distributeurs", orientation='h',
-                                   title="Top 10 : Distributeurs avec le Délai de Rappel le plus Long (Risque Élevé)",
-                                   color='Délai_Moyen_Jours', 
-                                   color_continuous_scale=px.colors.sequential.YlOrRd, 
-                                   text_auto='.1f') 
-                
-                fig_delay.update_layout(
-                    yaxis={'categoryorder':'total ascending', 'tickfont': {'size': 12}}, 
-                    xaxis_title="Délai Moyen (Jours) de Présence sur le Marché",
-                    yaxis_title="Distributeur",
-                    coloraxis_colorbar=dict(title="Jours")
-                )
-                
-                st.plotly_chart(fig_delay, use_container_width=True)
-            else:
-                st.info("Données de réactivité incomplètes ou non disponibles pour la période filtrée.")
+            # Ajout des lignes de quadrants (stratégiques)
+            fig_bubble.add_vline(x=avg_distrib['Délai_Moyen_Jours'].median(), line_dash="dash", line_color="#34495E")
+            fig_bubble.add_hline(y=avg_distrib['Nb_Rappels'].median(), line_dash="dash", line_color="#34495E")
+
+            fig_bubble.update_layout(xaxis_range=[0, avg_distrib['Délai_Moyen_Jours'].max() * 1.1])
+            st.plotly_chart(fig_bubble, use_container_width=True)
         else:
-            st.info("Colonnes de date de commercialisation et/ou distributeurs manquantes dans le fichier CSV.")
+            st.info("Données insuffisantes pour la matrice de risque distributeur.")
+    else:
+        st.info("Colonnes de date de commercialisation et/ou distributeurs manquantes dans le fichier CSV.")
 
 
 # ----------------------------------------------------------------------
-# TAB 3: RISQUE & CONFORMITÉ (SERVICES PRO)
+# TAB 3: RISQUE & CONFORMITÉ (DÉRIVE DES CAUSES RACINES)
 # ----------------------------------------------------------------------
 with tab3:
     st.header("🔬 Évaluation de la Gravité et Tendance du Risque (Assurance & Conseil)")
@@ -385,62 +436,83 @@ with tab3:
     # Indicateur de Volatilité du Marché
     df_vol = df_filtered.groupby(df_filtered["date_publication"].dt.to_period("M")).size().reset_index(name="Rappels")
     volatilite = df_vol["Rappels"].std() if not df_vol.empty else 0
-    
-    # CORRECTION : La ligne 388 posait problème ici. Le help a été corrigé pour utiliser des doubles guillemets ou des simples guillemets corrects.
     col4.metric("Volatilité Mensuelle (Écart-type)", f"{volatilite:.1f}", help="Écart-type du nombre de rappels par mois. Un nombre élevé signifie un marché imprévisible.")
 
 
-    # --- GRAPHIQUES CONFORMITÉ ---
-    st.markdown("### Analyse de Gravité et Volatilité du Marché")
-    col_gauche, col_droite = st.columns(2)
-
-    with col_gauche:
-        st.subheader("1. Corrélation : Risque vs. Catégorie (Analyse de Portefeuille)")
-        if not df_risques_exploded.empty and "categorie_de_produit" in df_filtered.columns:
+    st.markdown("### 2. Tendance : Dérive des Causes Racines (DCR) - Taux d'Émergence des Motifs")
+    
+    if "date_publication" in df_filtered.columns and "motif_du_rappel" in df_filtered.columns:
+        
+        # 1. Préparer les données
+        df_trend = df_filtered.copy()
+        df_trend["Mois"] = df_trend["date_publication"].dt.to_period("M")
+        
+        df_motifs = explode_column(df_trend, "motif_du_rappel")
+        df_motifs = df_motifs.reset_index().rename(columns={'index': 'original_index'})
+        df_motifs_merged = pd.merge(df_motifs, df_trend[['Mois', 'original_index']].reset_index(drop=True).rename(columns={'index': 'original_index'}), on='original_index', how='left')
+        
+        # 2. Calcul du classement mensuel
+        motif_counts = df_motifs_merged.groupby(['Mois', 'motif_du_rappel']).size().reset_index(name='Rappels')
+        
+        # Calcul du Rang (Rank) par mois
+        motif_counts['Rang'] = motif_counts.groupby('Mois')['Rappels'].rank(method='first', ascending=False)
+        
+        # Filtrer le top 5 des motifs globaux pour lisibilité
+        top_motifs_global = motif_counts['motif_du_rappel'].value_counts().head(5).index
+        df_rank = motif_counts[motif_counts['motif_du_rappel'].isin(top_motifs_global)].copy()
+        
+        df_rank['Mois'] = df_rank['Mois'].dt.to_timestamp()
+        
+        if not df_rank.empty:
+            # 3. Création du Bump Chart
+            fig_bump = px.line(df_rank, 
+                               x="Mois", 
+                               y="Rang", 
+                               color="motif_du_rappel", 
+                               line_shape='spline',
+                               markers=True,
+                               title="Évolution du Classement (Rang) des 5 Principaux Motifs de Rappel",
+                               labels={"Rang": "Classement (1 = Plus Fréquent)", "Mois": "Mois"},
+                               color_discrete_sequence=px.colors.qualitative.Dark24)
             
-            df_temp_risques = df_filtered.assign(risques_encourus=df_filtered['risques_encourus'].str.split(';')).explode('risques_encourus')
-            df_temp_risques['risques_encourus'] = df_temp_risques['risques_encourus'].str.strip()
-
-            risque_cat_counts = df_temp_risques.groupby(['categorie_de_produit', 'risques_encourus']).size().reset_index(name='Nombre')
-            risque_cat_counts = risque_cat_counts[risque_cat_counts['Nombre'] > 0]
+            fig_bump.update_yaxes(autorange="reversed", tickvals=[1, 2, 3, 4, 5], title="Classement (1 = le plus fréquent)")
+            fig_bump.update_traces(marker=dict(size=10))
             
-            top_risques_list = risque_cat_counts['risques_encourus'].value_counts().head(5).index
-            risque_cat_filtered = risque_cat_counts[risque_cat_counts['risques_encourus'].isin(top_risques_list)]
-
-            if not risque_cat_filtered.empty:
-                fig_bar = px.bar(risque_cat_filtered, x="categorie_de_produit", y="Nombre", color="risques_encourus", 
-                                 title="Distribution des 5 principaux risques par Catégorie de Produit",
-                                 labels={"categorie_de_produit": "Catégorie", "Nombre": "Nombre de Rappels"},
-                                 color_discrete_sequence=px.colors.qualitative.G10)
-                st.plotly_chart(fig_bar, use_container_width=True)
-            else:
-                 st.info("Pas assez de données pour générer le croisement Risque/Catégorie.")
+            st.plotly_chart(fig_bump, use_container_width=True)
         else:
-             st.info("Données de risque et/ou de catégorie manquantes.")
+            st.info("Données insuffisantes pour la Dérive des Causes Racines.")
+    else:
+        st.info("Colonnes manquantes pour l'analyse des motifs.")
 
-    with col_droite:
-        st.subheader("2. Tendance : Évolution des Rappels Graves vs. Mineurs")
-        if "date_publication" in df_filtered.columns and total_rappels > 0:
-            df_trend = df_filtered.copy()
-            df_trend["Type_Risque"] = np.where(df_trend["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False), 
-                                                "Risque_Grave", "Risque_Mineur/Non-classé")
-            
-            df_month_type = df_trend.groupby([df_trend["date_publication"].dt.to_period("M"), "Type_Risque"]).size().reset_index(name="Rappels")
-            df_month_type["date_publication"] = df_month_type["date_publication"].dt.to_timestamp()
-            
-            fig_trend_type = px.line(df_month_type, x="date_publication", y="Rappels", color="Type_Risque", 
-                                     title="Évolution mensuelle des Rappels Graves vs. Mineurs",
-                                     labels={"Rappels": "Volume de Rappels", "date_publication": "Mois"},
-                                     color_discrete_map={"Risque_Grave": '#E74C3C', "Risque_Mineur/Non-classé": '#F1C40F'},
-                                     line_shape='spline', markers=True)
-            st.plotly_chart(fig_trend_type, use_container_width=True)
+    st.markdown("---")
+    st.subheader("3. Corrélation : Risque vs. Catégorie (Analyse de Portefeuille)")
+    # ... (Le code du Bar chart reste inchangé)
+    if not df_risques_exploded.empty and "categorie_de_produit" in df_filtered.columns:
+        
+        df_temp_risques = df_filtered.assign(risques_encourus=df_filtered['risques_encourus'].str.split(';')).explode('risques_encourus')
+        df_temp_risques['risques_encourus'] = df_temp_risques['risques_encourus'].str.strip()
+
+        risque_cat_counts = df_temp_risques.groupby(['categorie_de_produit', 'risques_encourus']).size().reset_index(name='Nombre')
+        risque_cat_counts = risque_cat_counts[risque_cat_counts['Nombre'] > 0]
+        
+        top_risques_list = risque_cat_counts['risques_encourus'].value_counts().head(5).index
+        risque_cat_filtered = risque_cat_counts[risque_cat_counts['risques_encourus'].isin(top_risques_list)]
+
+        if not risque_cat_filtered.empty:
+            fig_bar = px.bar(risque_cat_filtered, x="categorie_de_produit", y="Nombre", color="risques_encourus", 
+                             title="Distribution des 5 principaux risques par Catégorie de Produit",
+                             labels={"categorie_de_produit": "Catégorie", "Nombre": "Nombre de Rappels"},
+                             color_discrete_sequence=px.colors.qualitative.G10)
+            st.plotly_chart(fig_bar, use_container_width=True)
         else:
-            st.info("Aucune donnée de publication ou de risque pour l'analyse de tendance.")
+             st.info("Pas assez de données pour générer le croisement Risque/Catégorie.")
+    else:
+         st.info("Données de risque et/ou de catégorie manquantes.")
 
 
 st.markdown("---")
 
-# --- 6. TABLEAU DE DONNÉES DÉTAILLÉ (NETTOYAGE DU MVP) ---
+# --- 6. TABLEAU DE DONNÉES DÉTAILLÉ ---
 with st.expander("🔍 Registre Détaillé des Rappels (Filtré)"):
     display_cols = [c for c in ["reference_fiche", "date_publication", "date_debut_commercialisation", "categorie_de_produit", "nom_marque_du_produit", "motif_du_rappel", "risques_encourus", "distributeurs", "zone_geographique_de_vente", "liens_vers_la_fiche_rappel"] if c in df_filtered.columns]
     
