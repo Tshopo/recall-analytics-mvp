@@ -6,6 +6,7 @@ from datetime import datetime
 import numpy as np
 
 # --- 1. CONFIGURATION ET MISE EN PAGE GLOBALE ---
+# Utilisation d'une palette de couleurs cohérente et un layout large
 st.set_page_config(page_title="Recall Analytics (RappelConso) - B2B PRO", layout="wide", initial_sidebar_state="expanded")
 st.title("🛡️ Recall Analytics — Dashboard d'Intelligence Marché (B2B PRO)")
 
@@ -20,7 +21,7 @@ st.markdown("---")
 
 @st.cache_data(ttl=3600)
 def load_data_from_csv(file_path="rappelconso_export.csv"):
-    """Charge les données à partir d'un fichier CSV local, standardise les noms de colonnes et gère les séparateurs."""
+    """Charge les données, standardise les colonnes et gère les séparateurs."""
     
     if not os.path.exists(file_path):
         st.error(f"❌ Fichier non trouvé : '{file_path}'. Veuillez vous assurer que le fichier CSV téléchargé est placé dans le même dossier que l'application et porte ce nom.")
@@ -29,7 +30,7 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
     df = pd.DataFrame()
     
     try:
-        # Tente avec le point-virgule (le plus probable pour les exports FR), puis la virgule
+        # Tente avec le point-virgule (FR), puis la virgule
         try:
             df = pd.read_csv(file_path, sep=";", encoding='utf-8')
             if df.shape[1] <= 1:
@@ -47,7 +48,7 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
             "motif_rappel": "motif_du_rappel",
             "numero_fiche": "reference_fiche",
             "lien_vers_la_fiche_rappel": "liens_vers_la_fiche_rappel",
-            "date_debut_commercialisation_produit": "date_debut_commercialisation", # Ajout pour robustesse
+            "date_debut_commercialisation_produit": "date_debut_commercialisation",
         }
         
         rename_dict = {old_name: new_name for old_name, new_name in column_mapping.items() if old_name in df.columns and old_name != new_name}
@@ -188,9 +189,7 @@ vitesse_reponse = "N/A"
 if "date_debut_commercialisation" in df_filtered.columns and not df_filtered["date_debut_commercialisation"].isnull().all():
     df_temp_dates = df_filtered.dropna(subset=["date_publication", "date_debut_commercialisation"]).copy()
     if not df_temp_dates.empty:
-        # Calcul : Date de publication - Date de début de commercialisation = Durée de la présence du produit sur le marché.
         df_temp_dates["duree_commercialisation"] = (df_temp_dates["date_publication"] - df_temp_dates["date_debut_commercialisation"]).dt.days
-        # Filtrer les valeurs négatives (erreurs de saisie)
         df_temp_dates = df_temp_dates[df_temp_dates["duree_commercialisation"] >= 0]
         if not df_temp_dates.empty:
             avg_days = df_temp_dates["duree_commercialisation"].mean()
@@ -350,10 +349,20 @@ with tab2:
             top_10_distrib = avg_delay_distrib.sort_values(by="Délai_Moyen_Jours", ascending=False).head(10)
             
             if not top_10_distrib.empty:
+                # --- AMÉLIORATION DE LA VISUALISATION ---
                 fig_delay = px.bar(top_10_distrib, x="Délai_Moyen_Jours", y="distributeurs", orientation='h',
-                                   title="Délai moyen (jours) de présence du produit défectueux sur le marché (Top 10 Moins Réactifs)",
-                                   color='Délai_Moyen_Jours', color_continuous_scale=px.colors.sequential.YlOrRd)
-                fig_delay.update_layout(yaxis={'categoryorder':'total ascending'}, xaxis_title="Délai Moyen (Jours)")
+                                   title="Top 10 : Distributeurs avec le Délai de Rappel le plus Long (Risque Élevé)",
+                                   color='Délai_Moyen_Jours', # La couleur reflète l'intensité du délai
+                                   color_continuous_scale=px.colors.sequential.YlOrRd, # Échelle de couleur Risque (Jaune -> Rouge)
+                                   text_auto='.1f') # Afficher les valeurs numériques (arrondies) sur les barres
+                
+                fig_delay.update_layout(
+                    yaxis={'categoryorder':'total ascending', 'tickfont': {'size': 12}}, # Améliorer la lisibilité des labels Y
+                    xaxis_title="Délai Moyen (Jours) de Présence sur le Marché",
+                    yaxis_title="Distributeur",
+                    coloraxis_colorbar=dict(title="Jours")
+                )
+                
                 st.plotly_chart(fig_delay, use_container_width=True)
             else:
                 st.info("Données de réactivité incomplètes ou non disponibles pour la période filtrée.")
@@ -376,67 +385,4 @@ with tab3:
     # Indicateur de Volatilité du Marché
     df_vol = df_filtered.groupby(df_filtered["date_publication"].dt.to_period("M")).size().reset_index(name="Rappels")
     volatilite = df_vol["Rappels"].std() if not df_vol.empty else 0
-    col4.metric("Volatilité Mensuelle (Écart-type)", f"{volatilite:.1f}", help="Écart-type du nombre de rappels par mois. Un nombre élevé signifie un marché imprévisible.")
-
-
-    # --- GRAPHIQUES CONFORMITÉ ---
-    st.markdown("### Analyse de Gravité et Volatilité du Marché")
-    col_gauche, col_droite = st.columns(2)
-
-    with col_gauche:
-        st.subheader("1. Corrélation : Risque vs. Catégorie (Analyse de Portefeuille)")
-        if not df_risques_exploded.empty and "categorie_de_produit" in df_filtered.columns:
-            
-            df_temp_risques = df_filtered.assign(risques_encourus=df_filtered['risques_encourus'].str.split(';')).explode('risques_encourus')
-            df_temp_risques['risques_encourus'] = df_temp_risques['risques_encourus'].str.strip()
-
-            risque_cat_counts = df_temp_risques.groupby(['categorie_de_produit', 'risques_encourus']).size().reset_index(name='Nombre')
-            risque_cat_counts = risque_cat_counts[risque_cat_counts['Nombre'] > 0]
-            
-            top_risques_list = risque_cat_counts['risques_encourus'].value_counts().head(5).index
-            risque_cat_filtered = risque_cat_counts[risque_cat_counts['risques_encourus'].isin(top_risques_list)]
-
-            if not risque_cat_filtered.empty:
-                fig_bar = px.bar(risque_cat_filtered, x="categorie_de_produit", y="Nombre", color="risques_encourus", 
-                                 title="Distribution des 5 principaux risques par Catégorie de Produit",
-                                 labels={"categorie_de_produit": "Catégorie", "Nombre": "Nombre de Rappels"},
-                                 color_discrete_sequence=px.colors.qualitative.G10)
-                st.plotly_chart(fig_bar, use_container_width=True)
-            else:
-                 st.info("Pas assez de données pour générer le croisement Risque/Catégorie.")
-        else:
-             st.info("Données de risque et/ou de catégorie manquantes.")
-
-    with col_droite:
-        st.subheader("2. Tendance : Évolution des Rappels Graves vs. Mineurs")
-        if "date_publication" in df_filtered.columns and total_rappels > 0:
-            df_trend = df_filtered.copy()
-            df_trend["Type_Risque"] = np.where(df_trend["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False), 
-                                                "Risque_Grave", "Risque_Mineur/Non-classé")
-            
-            df_month_type = df_trend.groupby([df_trend["date_publication"].dt.to_period("M"), "Type_Risque"]).size().reset_index(name="Rappels")
-            df_month_type["date_publication"] = df_month_type["date_publication"].dt.to_timestamp()
-            
-            fig_trend_type = px.line(df_month_type, x="date_publication", y="Rappels", color="Type_Risque", 
-                                     title="Évolution mensuelle des Rappels Graves vs. Mineurs",
-                                     labels={"Rappels": "Volume de Rappels", "date_publication": "Mois"},
-                                     color_discrete_map={"Risque_Grave": '#E74C3C', "Risque_Mineur/Non-classé": '#F1C40F'},
-                                     line_shape='spline', markers=True)
-            st.plotly_chart(fig_trend_type, use_container_width=True)
-        else:
-            st.info("Aucune donnée de publication ou de risque pour l'analyse de tendance.")
-
-
-st.markdown("---")
-
-# --- 6. TABLEAU DE DONNÉES DÉTAILLÉ (NETTOYAGE DU MVP) ---
-with st.expander("🔍 Registre Détaillé des Rappels (Filtré)"):
-    display_cols = [c for c in ["reference_fiche", "date_publication", "date_debut_commercialisation", "categorie_de_produit", "nom_marque_du_produit", "motif_du_rappel", "risques_encourus", "distributeurs", "zone_geographique_de_vente", "liens_vers_la_fiche_rappel"] if c in df_filtered.columns]
-    
-    st.dataframe(df_filtered[display_cols].sort_values(by="date_publication", ascending=False).reset_index(drop=True), use_container_width=True)
-
-    csv = df_filtered[display_cols].to_csv(index=False).encode('utf-8')
-    st.download_button(label="💾 Télécharger les Données Filtrées (CSV)", data=csv, file_name="recall_analytics_export_filtered.csv", mime="text/csv")
-
-
-st.caption("Prototype Recall Analytics — Données publiques (c) RappelConso.gouv.fr / Ministère de l'Économie")
+    col4.metric("Volatilité Mensuelle (
