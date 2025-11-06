@@ -352,12 +352,12 @@ with tab2:
                 # --- AMÉLIORATION DE LA VISUALISATION ---
                 fig_delay = px.bar(top_10_distrib, x="Délai_Moyen_Jours", y="distributeurs", orientation='h',
                                    title="Top 10 : Distributeurs avec le Délai de Rappel le plus Long (Risque Élevé)",
-                                   color='Délai_Moyen_Jours', # La couleur reflète l'intensité du délai
-                                   color_continuous_scale=px.colors.sequential.YlOrRd, # Échelle de couleur Risque (Jaune -> Rouge)
-                                   text_auto='.1f') # Afficher les valeurs numériques (arrondies) sur les barres
+                                   color='Délai_Moyen_Jours', 
+                                   color_continuous_scale=px.colors.sequential.YlOrRd, 
+                                   text_auto='.1f') 
                 
                 fig_delay.update_layout(
-                    yaxis={'categoryorder':'total ascending', 'tickfont': {'size': 12}}, # Améliorer la lisibilité des labels Y
+                    yaxis={'categoryorder':'total ascending', 'tickfont': {'size': 12}}, 
                     xaxis_title="Délai Moyen (Jours) de Présence sur le Marché",
                     yaxis_title="Distributeur",
                     coloraxis_colorbar=dict(title="Jours")
@@ -385,4 +385,69 @@ with tab3:
     # Indicateur de Volatilité du Marché
     df_vol = df_filtered.groupby(df_filtered["date_publication"].dt.to_period("M")).size().reset_index(name="Rappels")
     volatilite = df_vol["Rappels"].std() if not df_vol.empty else 0
-    col4.metric("Volatilité Mensuelle (
+    
+    # CORRECTION : La ligne 388 posait problème ici. Le help a été corrigé pour utiliser des doubles guillemets ou des simples guillemets corrects.
+    col4.metric("Volatilité Mensuelle (Écart-type)", f"{volatilite:.1f}", help="Écart-type du nombre de rappels par mois. Un nombre élevé signifie un marché imprévisible.")
+
+
+    # --- GRAPHIQUES CONFORMITÉ ---
+    st.markdown("### Analyse de Gravité et Volatilité du Marché")
+    col_gauche, col_droite = st.columns(2)
+
+    with col_gauche:
+        st.subheader("1. Corrélation : Risque vs. Catégorie (Analyse de Portefeuille)")
+        if not df_risques_exploded.empty and "categorie_de_produit" in df_filtered.columns:
+            
+            df_temp_risques = df_filtered.assign(risques_encourus=df_filtered['risques_encourus'].str.split(';')).explode('risques_encourus')
+            df_temp_risques['risques_encourus'] = df_temp_risques['risques_encourus'].str.strip()
+
+            risque_cat_counts = df_temp_risques.groupby(['categorie_de_produit', 'risques_encourus']).size().reset_index(name='Nombre')
+            risque_cat_counts = risque_cat_counts[risque_cat_counts['Nombre'] > 0]
+            
+            top_risques_list = risque_cat_counts['risques_encourus'].value_counts().head(5).index
+            risque_cat_filtered = risque_cat_counts[risque_cat_counts['risques_encourus'].isin(top_risques_list)]
+
+            if not risque_cat_filtered.empty:
+                fig_bar = px.bar(risque_cat_filtered, x="categorie_de_produit", y="Nombre", color="risques_encourus", 
+                                 title="Distribution des 5 principaux risques par Catégorie de Produit",
+                                 labels={"categorie_de_produit": "Catégorie", "Nombre": "Nombre de Rappels"},
+                                 color_discrete_sequence=px.colors.qualitative.G10)
+                st.plotly_chart(fig_bar, use_container_width=True)
+            else:
+                 st.info("Pas assez de données pour générer le croisement Risque/Catégorie.")
+        else:
+             st.info("Données de risque et/ou de catégorie manquantes.")
+
+    with col_droite:
+        st.subheader("2. Tendance : Évolution des Rappels Graves vs. Mineurs")
+        if "date_publication" in df_filtered.columns and total_rappels > 0:
+            df_trend = df_filtered.copy()
+            df_trend["Type_Risque"] = np.where(df_trend["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False), 
+                                                "Risque_Grave", "Risque_Mineur/Non-classé")
+            
+            df_month_type = df_trend.groupby([df_trend["date_publication"].dt.to_period("M"), "Type_Risque"]).size().reset_index(name="Rappels")
+            df_month_type["date_publication"] = df_month_type["date_publication"].dt.to_timestamp()
+            
+            fig_trend_type = px.line(df_month_type, x="date_publication", y="Rappels", color="Type_Risque", 
+                                     title="Évolution mensuelle des Rappels Graves vs. Mineurs",
+                                     labels={"Rappels": "Volume de Rappels", "date_publication": "Mois"},
+                                     color_discrete_map={"Risque_Grave": '#E74C3C', "Risque_Mineur/Non-classé": '#F1C40F'},
+                                     line_shape='spline', markers=True)
+            st.plotly_chart(fig_trend_type, use_container_width=True)
+        else:
+            st.info("Aucune donnée de publication ou de risque pour l'analyse de tendance.")
+
+
+st.markdown("---")
+
+# --- 6. TABLEAU DE DONNÉES DÉTAILLÉ (NETTOYAGE DU MVP) ---
+with st.expander("🔍 Registre Détaillé des Rappels (Filtré)"):
+    display_cols = [c for c in ["reference_fiche", "date_publication", "date_debut_commercialisation", "categorie_de_produit", "nom_marque_du_produit", "motif_du_rappel", "risques_encourus", "distributeurs", "zone_geographique_de_vente", "liens_vers_la_fiche_rappel"] if c in df_filtered.columns]
+    
+    st.dataframe(df_filtered[display_cols].sort_values(by="date_publication", ascending=False).reset_index(drop=True), use_container_width=True)
+
+    csv = df_filtered[display_cols].to_csv(index=False).encode('utf-8')
+    st.download_button(label="💾 Télécharger les Données Filtrées (CSV)", data=csv, file_name="recall_analytics_export_filtered.csv", mime="text/csv")
+
+
+st.caption("Prototype Recall Analytics — Données publiques (c) RappelConso.gouv.fr / Ministère de l'Économie")
