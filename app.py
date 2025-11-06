@@ -38,7 +38,8 @@ def load_geojson():
     POUR ACTIVER LA CARTE:
     Placez 'departements.geojson' dans le dossier de l'application.
     """
-    geojson_path = "departements.geojson" # <-- Modifier ce chemin si nécessaire
+    # *** POINT DE VERIFICATION CRITIQUE : LE NOM DU FICHIER DOIT ÊTRE EXACT ***
+    geojson_path = "departements.geojson" 
     
     if os.path.exists(geojson_path):
         try:
@@ -50,7 +51,7 @@ def load_geojson():
             st.sidebar.error(f"Erreur lors du chargement du GeoJSON : {e}")
             return None
     else:
-        # st.sidebar.warning(f"Fichier GeoJSON '{geojson_path}' non trouvé.")
+        # Retourne None si le fichier n'est pas trouvé, déclenchant le mode de repli (Traffic Light Table)
         return None
 
 # --- 1. CONFIGURATION ET MISE EN PAGE GLOBALE ---
@@ -545,15 +546,14 @@ with tab2:
                 geo_counts['Couleur_Hex'] = geo_counts['Nombre_Rappels'].apply(get_plotly_color)
                 
                 try:
-                    # Le champ 'properties.code' doit correspondre au champ d'ID du GeoJSON
+                    # 'properties.code' est la clé d'ID (confirmé par l'utilisateur)
                     fig_map = px.choropleth(geo_counts,
                                             geojson=geojson_data,
                                             locations='zone_clean',
-                                            # ATTENTION : 'properties.code' est l'identifiant standard pour les codes départementaux. 
                                             featureidkey="properties.code", 
-                                            color='Nombre_Rappels', # Colorez par le nombre pour la légende
+                                            color='Nombre_Rappels', 
                                             hover_name='zone_clean',
-                                            color_continuous_scale=["#2ECC71", "#F39C12", "#E74C3C"], # Vert-Orange-Rouge
+                                            color_continuous_scale=["#2ECC71", "#F39C12", "#E74C3C"], 
                                             range_color=[0, SEUIL_ORANGE_MAX + 1], 
                                             scope='europe', 
                                             title="Répartition Géospatiale du Risque (Traffic Light)",
@@ -564,7 +564,7 @@ with tab2:
                     
                     st.plotly_chart(fig_map, use_container_width=True)
                 except Exception as e:
-                    st.warning(f"⚠️ Impossible d'afficher la carte Choropleth (Erreur Plotly : {e}). Vérifiez la correspondance des codes dans le GeoJSON (notamment featureidkey).")
+                    st.warning(f"⚠️ Impossible d'afficher la carte Choropleth (Erreur Plotly : {e}). Vérifiez la correspondance des codes dans le GeoJSON.")
                     
                     # Affichage du tableau de bord Traffic Light (Méthode de repli)
                     st.dataframe(geo_counts[['zone_clean', 'Nombre_Rappels', 'Niveau_Risque']].rename(columns={
