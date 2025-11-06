@@ -32,9 +32,31 @@ def get_traffic_light(count):
         return "🔴 Critique (Red)"
 
 # Charger un GeoJSON simple pour la France
+@st.cache_data(ttl=3600)
 def load_geojson():
-    # Pour l'environnement Cloud/Streamlit sans fichier externe, on retourne None et on gère l'affichage en info.
-    return None
+    """
+    Tente de charger un fichier GeoJSON pour la cartographie.
+    Si le fichier est manquant ou non supporté par l'environnement, retourne None.
+    
+    INSTRUCTIONS POUR ACTIVER LA CARTE :
+    1. Téléchargez un GeoJSON des départements français (e.g., departements.geojson).
+    2. Placez le fichier dans le même répertoire que app.py.
+    3. Mettez à jour le chemin ci-dessous.
+    """
+    geojson_path = "departements.geojson" # <-- Modifier ce chemin si nécessaire
+    
+    if os.path.exists(geojson_path):
+        try:
+            with open(geojson_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            st.sidebar.success("GeoJSON chargé avec succès pour la cartographie.")
+            return data
+        except Exception as e:
+            st.sidebar.error(f"Erreur lors du chargement du GeoJSON : {e}")
+            return None
+    else:
+        #st.sidebar.warning(f"Fichier GeoJSON '{geojson_path}' non trouvé.")
+        return None
 
 # --- 1. CONFIGURATION ET MISE EN PAGE GLOBALE ---
 st.set_page_config(page_title="Recall Analytics (RappelConso) - B2B PRO", layout="wide", initial_sidebar_state="expanded")
@@ -142,6 +164,7 @@ def safe_filter_list(df_source, col_name, exploded=False):
 
 # --- 3. CHARGEMENT ET FILTRES GLOBAUX ---
 df = load_data_from_csv()
+geojson_data = load_geojson() # Tente de charger le GeoJSON ici
 
 if df.empty:
     st.stop()
@@ -502,7 +525,9 @@ with tab2:
         df_geo = explode_column(df_filtered, "zone_geographique_de_vente")
         
         # Tentative d'extraction du code départemental/régional (très simplifié)
+        # On essaie d'abord d'extraire des nombres à 2 ou 3 chiffres (code départemental/postal)
         df_geo['zone_clean'] = df_geo['zone_geographique_de_vente'].str.extract(r'(\d{2,3})') 
+        # Si échec, on prend le premier mot (pour les noms de régions/villes)
         df_geo.loc[df_geo['zone_clean'].isna(), 'zone_clean'] = df_geo.loc[df_geo['zone_clean'].isna(), 'zone_geographique_de_vente'].str.split('-').str[0].str.strip()
         df_geo = df_geo.dropna(subset=['zone_clean'])
         
@@ -514,7 +539,6 @@ with tab2:
             geo_counts['Niveau_Risque'] = geo_counts['Nombre_Rappels'].apply(get_traffic_light)
             
             # Affichage de la carte Choropleth si GeoJSON disponible (avec attribution de couleur)
-            geojson_data = load_geojson()
             if geojson_data:
                 
                 # Attribuer les couleurs pour la carte Plotly
@@ -526,6 +550,7 @@ with tab2:
                 geo_counts['Couleur'] = geo_counts['Nombre_Rappels'].apply(get_plotly_color)
                 
                 try:
+                    # Le champ 'properties.code' doit correspondre au champ d'ID du GeoJSON
                     fig_map = px.choropleth(geo_counts,
                                             geojson=geojson_data,
                                             locations='zone_clean',
@@ -537,24 +562,28 @@ with tab2:
                                             height=500)
                     fig_map.update_geos(fitbounds="locations", visible=False)
                     st.plotly_chart(fig_map, use_container_width=True)
-                except Exception:
-                    st.warning("⚠️ Impossible d'afficher la carte Choropleth (GeoJSON manquant). Affichage du tableau de bord Traffic Light.")
+                except Exception as e:
+                    st.warning(f"⚠️ Impossible d'afficher la carte Choropleth : {e}. Vérifiez la correspondance des codes dans le GeoJSON.")
+                    st.info("Affichage du tableau de bord Traffic Light par Zone de Vente (Méthode de repli).")
                     
-                    # FIX #1: Utilisation du nom de colonne renommé 'Nbre de Rappels' pour le tri
+                    # Affichage du tableau de bord Traffic Light (Méthode de repli)
                     st.dataframe(geo_counts[['zone_clean', 'Nombre_Rappels', 'Niveau_Risque']].rename(columns={
                         'zone_clean': 'Zone Géographique', 
                         'Nombre_Rappels': 'Nbre de Rappels'
+                    # Correction du KeyError : trier par le nom de colonne renommé
                     }).sort_values(by='Nbre de Rappels', ascending=False), 
                     hide_index=True, use_container_width=True)
 
             else:
                 # Affichage du tableau de bord Traffic Light (par défaut si pas de GeoJSON)
-                st.info("Impossible de charger la carte Choropleth. Affichage du tableau de bord Traffic Light par Zone de Vente.")
+                st.info("Impossible de charger la carte Choropleth (GeoJSON manquant). Affichage du tableau de bord Traffic Light par Zone de Vente.")
                 
-                # FIX #2: Utilisation du nom de colonne renommé 'Nbre de Rappels' pour le tri
+                st.markdown("---")
+                st.markdown("#### Tableau de Risque Géographique (Repli)")
                 st.dataframe(geo_counts[['zone_clean', 'Nombre_Rappels', 'Niveau_Risque']].rename(columns={
                     'zone_clean': 'Zone Géographique', 
                     'Nombre_Rappels': 'Nbre de Rappels'
+                # Correction du KeyError : trier par le nom de colonne renommé
                 }).sort_values(by='Nbre de Rappels', ascending=False), 
                 hide_index=True, use_container_width=True)
                 
