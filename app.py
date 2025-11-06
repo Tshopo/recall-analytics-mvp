@@ -34,11 +34,8 @@ def load_geojson():
     """
     Tente de charger un fichier GeoJSON pour la cartographie.
     Si le fichier est manquant ou non supporté, retourne None.
-    
-    POUR ACTIVER LA CARTE:
-    Placez 'departements.geojson' dans le dossier de l'application.
     """
-    # *** POINT DE VERIFICATION CRITIQUE : LE NOM DU FICHIER DOIT ÊTRE EXACT ***
+    # *** Le fichier GeoJSON doit être nommé EXACTEMENT 'departements.geojson' ***
     geojson_path = "departements.geojson" 
     
     if os.path.exists(geojson_path):
@@ -51,7 +48,7 @@ def load_geojson():
             st.sidebar.error(f"Erreur lors du chargement du GeoJSON : {e}")
             return None
     else:
-        # Retourne None si le fichier n'est pas trouvé, déclenchant le mode de repli (Traffic Light Table)
+        # Retourne None si le fichier n'est pas trouvé
         return None
 
 # --- 1. CONFIGURATION ET MISE EN PAGE GLOBALE ---
@@ -535,7 +532,7 @@ with tab2:
             # Affichage de la carte Choropleth si GeoJSON disponible (avec attribution de couleur)
             if geojson_data:
                 
-                st.info("✅ GeoJSON détecté. Affichage de la carte de risque géospatial.")
+                st.info("✅ GeoJSON détecté. Affichage de la carte de risque géospatial (Taille ajustée).")
                 
                 # Attribuer les couleurs pour la carte Plotly
                 def get_plotly_color(count):
@@ -546,7 +543,7 @@ with tab2:
                 geo_counts['Couleur_Hex'] = geo_counts['Nombre_Rappels'].apply(get_plotly_color)
                 
                 try:
-                    # 'properties.code' est la clé d'ID (confirmé par l'utilisateur)
+                    # CODE MODIFIÉ POUR L'AGRANDISSEMENT DE LA CARTE
                     fig_map = px.choropleth(geo_counts,
                                             geojson=geojson_data,
                                             locations='zone_clean',
@@ -555,11 +552,16 @@ with tab2:
                                             hover_name='zone_clean',
                                             color_continuous_scale=["#2ECC71", "#F39C12", "#E74C3C"], 
                                             range_color=[0, SEUIL_ORANGE_MAX + 1], 
-                                            scope='europe', 
+                                            # scope='europe', # Laisser commenté ou supprimer pour permettre le centrage
                                             title="Répartition Géospatiale du Risque (Traffic Light)",
-                                            height=500)
+                                            height=1000) # HAUTEUR AJUSTÉE DE 500 À 1000
                     
-                    fig_map.update_geos(fitbounds="locations", visible=False)
+                    fig_map.update_geos(
+                        fitbounds="locations", 
+                        visible=False,
+                        center={"lat": 46.603354, "lon": 1.888334}, # Centre sur la France
+                        projection_scale=3 # Niveau de zoom ajusté
+                    )
                     fig_map.update_layout(coloraxis_showscale=False) 
                     
                     st.plotly_chart(fig_map, use_container_width=True)
