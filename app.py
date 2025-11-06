@@ -52,7 +52,7 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
         rename_dict = {old_name: new_name for old_name, new_name in column_mapping.items() if old_name in df.columns and old_name != new_name}
         df = df.rename(columns=rename_dict)
 
-        required_cols = ["categorie_de_produit", "nom_marque_du_produit", "motif_du_rappel", "distributeurs"]
+        required_cols = ["categorie_de_produit", "nom_marque_du_produit", "motif_du_rappel", "distributeurs", "date_publication"]
         missing_cols = [c for c in required_cols if c not in df.columns]
 
         if missing_cols:
@@ -63,6 +63,9 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
         if "date_publication" in df.columns:
             df["date_publication"] = pd.to_datetime(df["date_publication"], errors="coerce", utc=True)
             df = df.sort_values(by="date_publication", ascending=False) 
+        
+        if "date_debut_commercialisation" in df.columns:
+            df["date_debut_commercialisation"] = pd.to_datetime(df["date_debut_commercialisation"], errors="coerce", utc=True)
 
         # 2. Nettoyage des colonnes multi-valeurs
         for col in ["distributeurs", "zone_geographique_de_vente", "risques_encourus", "motif_du_rappel", "categorie_de_produit", "nom_marque_du_produit"]:
@@ -110,7 +113,7 @@ def safe_filter_list(df_source, col_name, exploded=False):
     return ["Toutes"]
 
 
-# --- 3. CHARGEMENT ET FILTRES GLOBALES ---
+# --- 3. CHARGEMENT ET FILTRES GLOBAUX ---
 df = load_data_from_csv()
 
 if df.empty:
@@ -157,10 +160,10 @@ if distrib != "Toutes" and "distributeurs" in df_filtered.columns:
 
 # --- 4. CALCULS TRANSVERSAUX (KPIs) ---
 total_rappels = len(df_filtered)
-
-# Calcul du risque principal
 df_risques_exploded = explode_column(df_filtered, "risques_encourus")
-risque_principal = "N/A (Données manquantes)"
+
+# Risque principal
+risque_principal = "N/A"
 if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.columns:
     risque_counts = df_risques_exploded["risques_encourus"].value_counts()
     if not risque_counts.empty:
@@ -168,7 +171,7 @@ if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.c
         if risque_major:
             risque_principal = risque_major.title()
 
-# Calcul du Taux de Risque Microbiologique
+# Taux de Risque Microbiologique
 taux_microbien = 0.0
 if "motif_du_rappel" in df_filtered.columns and total_rappels > 0:
     microbien_count = df_filtered[df_filtered["motif_du_rappel"].str.contains("microbiologique|salmonelle|listeria|ecoli", case=False, na=False)].shape[0]
@@ -177,8 +180,8 @@ if "motif_du_rappel" in df_filtered.columns and total_rappels > 0:
 else:
     taux_microbien_str = "N/A"
 
-# Calcul du % de Rappels graves (Basé sur le mot-clé 'listeriose', 'salmonellose', 'e.coli', 'blessures')
-risques_graves_keywords = "listeriose|salmonellose|e\.coli|blessures|allergene non declare"
+# % de Rappels graves
+risques_graves_keywords = "listeriose|salmonellose|e\.coli|blessures|allergene non declare|corps étranger"
 df_risques_grave = explode_column(df_filtered, "risques_encourus")
 pc_risques_graves = 0.0
 if not df_risques_grave.empty and total_rappels > 0:
@@ -188,30 +191,48 @@ if not df_risques_grave.empty and total_rappels > 0:
 else:
     pc_risques_graves_str = "N/A"
 
+# Vitesse de Réponse Moyenne (Proxy) - Pour Tab 3
+vitesse_reponse = "N/A"
+if "date_debut_commercialisation" in df_filtered.columns and not df_filtered["date_debut_commercialisation"].isnull().all():
+    df_temp_dates = df_filtered.dropna(subset=["date_publication", "date_debut_commercialisation"]).copy()
+    if not df_temp_dates.empty:
+        df_temp_dates["duree_commercialisation"] = (df_temp_dates["date_publication"] - df_temp_dates["date_debut_commercialisation"]).dt.days
+        avg_days = df_temp_dates["duree_commercialisation"].mean()
+        vitesse_reponse = f"{avg_days:.1f} jours"
+    
+# Concentration du Risque Fournisseur - Pour Tab 2
+concentration_risque = "N/A"
+if "nom_marque_du_produit" in df_filtered.columns and total_rappels > 0:
+    top_5_marques = df_filtered["nom_marque_du_produit"].value_counts().nlargest(5)
+    if not top_5_marques.empty:
+        concentration = top_5_marques.sum() / total_rappels * 100
+        concentration_risque = f"{concentration:.1f}%"
+
 
 # --- 5. STRUCTURE DU TABLEAU DE BORD PAR ACTEUR (TABS) ---
 
-tab1, tab2, tab3 = st.tabs(["🏭 Fabricants & Marques (Benchmarking)", "🛒 Distributeurs & Retailers (Canal)", "🔬 Risque & Conformité (Services Pro)"])
+tab1, tab2, tab3 = st.tabs(["🏭 Fabricants & Marques", "🛒 Distributeurs & Retailers", "🔬 Risque & Conformité"])
 
 
 # ----------------------------------------------------------------------
-# TAB 1: FABRICANTS & MARQUES
+# TAB 1: FABRICANTS & MARQUES (BENCHMARKING)
 # ----------------------------------------------------------------------
 with tab1:
     st.header("🎯 Intelligence Concurrentielle & Maîtrise du Risque Fournisseur")
-    st.markdown("Analysez votre positionnement (Share of Recall) face à la concurrence et identifiez les causes racines (Motifs).")
 
     # --- KPI FABRICANT ---
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Rappels (Périmètre Filtré)", total_rappels)
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Rappels (Périmètre)", total_rappels)
     col2.metric("Marques Impactées", df_filtered["nom_marque_du_produit"].nunique() if "nom_marque_du_produit" in df.columns else 0)
+    col3.metric("Risque Principal", risque_principal)
     
-    # Indicateur avancé: Diversité des Motifs (Mesure de la robustesse globale)
-    motifs_uniques = df_filtered["motif_du_rappel"].nunique() if "motif_du_rappel" in df.columns else 0
-    col3.metric("Diversité des Motifs de Rappel", motifs_uniques, help="Un nombre élevé suggère une dispersion des problèmes (moins de maîtrise qualité).")
+    # Nouvel Indicateur: Taux d'Aggravation du Risque (TAR)
+    # Proxy: % de rappels qui ont à la fois un motif 'non-conformité mineure' et un risque 'grave'
+    col4.metric("% Rappels à Risque Grave", pc_risques_graves_str, help="Pourcentage des rappels liés à des risques sérieux (Listeria, Salmonelle, Allergènes non déclarés).")
 
 
     # --- GRAPHIQUES FABRICANT ---
+    st.markdown("### Analyse de Positionnement et Causes Racines")
     col_gauche, col_droite = st.columns(2)
 
     with col_gauche:
@@ -222,87 +243,130 @@ with tab1:
                 "proportion": "Part_de_Rappel_pourcent"
             })
             top_marques = top_marques.head(10)
-            fig_sor = px.bar(top_marques, y="Marque", x="Part_de_Rappel_pourcent", orientation='h', title="Top 10 : Contribution (%) aux rappels du marché (catégorie et période sélectionnées)",
+            fig_sor = px.bar(top_marques, y="Marque", x="Part_de_Rappel_pourcent", orientation='h', title="Top 10 : Contribution (%) aux rappels du marché",
                              color='Part_de_Rappel_pourcent', color_continuous_scale=px.colors.sequential.Plotly3)
-            fig_sor.update_layout(yaxis={'categoryorder':'total ascending'})
+            fig_sor.update_layout(yaxis={'categoryorder':'total ascending'}, xaxis_title="Part (%) des Rappels Filtrés")
             st.plotly_chart(fig_sor, use_container_width=True)
         else:
             st.info("Aucune donnée pour le benchmarking des marques.")
 
     with col_droite:
-        st.subheader("2. Causes Racines : Distribution des Motifs de Rappel")
-        if "motif_du_rappel" in df_filtered.columns and total_rappels > 0:
-            top_motifs = df_filtered["motif_du_rappel"].value_counts().reset_index().rename(columns={
-                "motif_du_rappel": "Motif", 
-                "count": "Nombre_de_Rappels"
-            }).head(10)
-            fig_motifs = px.pie(top_motifs, values="Nombre_de_Rappels", names="Motif", title="Fréquence des causes de défaillance")
-            fig_motifs.update_traces(textinfo='percent+label')
-            st.plotly_chart(fig_motifs, use_container_width=True)
+        st.subheader("2. Tendance : SoR de la Marque vs. Marché")
+        if marque != "Toutes" and "date_publication" in df_filtered.columns:
+            df_trend = df.copy()
+            df_trend = df_trend[df_trend["date_publication"] >= df_filtered["date_publication"].min()]
+            
+            # Agrégation mensuelle
+            df_month = df_trend.groupby(df_trend["date_publication"].dt.to_period("M")).size().reset_index(name="Total_Marché")
+            df_month["Total_Marché"] = df_month["Total_Marché"].cumsum()
+            
+            df_marque_month = df_trend[df_trend["nom_marque_du_produit"] == marque].groupby(df_trend["date_publication"].dt.to_period("M")).size().reset_index(name=marque.title())
+            df_marque_month[marque.title()] = df_marque_month[marque.title()].cumsum()
+
+            df_comp = pd.merge(df_month, df_marque_month, on="date_publication", how="outer").fillna(0)
+            df_comp["date_publication"] = df_comp["date_publication"].dt.to_timestamp()
+            
+            # Calcul du SoR cumulé
+            df_comp[f"SoR_{marque.title()}"] = (df_comp[marque.title()] / df_comp["Total_Marché"]) * 100
+            
+            fig_trend = px.line(df_comp, x="date_publication", y=[f"SoR_{marque.title()}"], 
+                                title=f"Évolution du Share of Recall (SoR) cumulé pour {marque.title()}",
+                                labels={"value": "SoR (%)", "date_publication": "Mois"},
+                                color_discrete_sequence=['#FF4B4B'])
+            st.plotly_chart(fig_trend, use_container_width=True)
         else:
-            st.info("Aucun motif identifiable dans les données filtrées.")
+            st.info("Sélectionnez une marque dans la sidebar pour afficher la tendance SoR.")
+
+    st.markdown("---")
+    st.subheader("3. Corrélation : Matrice des Motifs vs. Risques")
+    if "risques_encourus" in df_filtered.columns and "motif_du_rappel" in df_filtered.columns:
+        # Créer une matrice de cooccurrence simple
+        df_corr = df_filtered.copy()
+        df_corr["Motif_court"] = df_corr["motif_du_rappel"].str.split(r'[;.,]').str[0].str.strip()
+        
+        # S'assurer que chaque ligne est une combinaison Risque-Motif
+        df_exploded_motif_risque = df_corr.assign(risques_encourus=df_corr['risques_encourus'].str.split(';')).explode('risques_encourus')
+        df_exploded_motif_risque['risques_encourus'] = df_exploded_motif_risque['risques_encourus'].str.strip()
+        
+        cooccurrence = df_exploded_motif_risque.groupby(['Motif_court', 'risques_encourus']).size().reset_index(name='Nombre')
+        cooccurrence = cooccurrence[cooccurrence['Nombre'] > 0]
+        
+        # Prendre les top 5 des deux côtés
+        top_motifs_list = cooccurrence['Motif_court'].value_counts().head(5).index
+        top_risques_list = cooccurrence['risques_encourus'].value_counts().head(5).index
+        
+        cooccurrence_filtered = cooccurrence[
+            cooccurrence['Motif_court'].isin(top_motifs_list) & 
+            cooccurrence['risques_encourus'].isin(top_risques_list)
+        ]
+        
+        if not cooccurrence_filtered.empty:
+            fig_heatmap = px.density_heatmap(cooccurrence_filtered, x="Motif_court", y="risques_encourus", z="Nombre", 
+                                             title="Fréquence d'association des Top 5 Motifs et Top 5 Risques",
+                                             text_auto=True, color_continuous_scale="Plasma")
+            st.plotly_chart(fig_heatmap, use_container_width=True)
+        else:
+            st.info("Pas assez de données pour générer la matrice de corrélation Motif/Risque.")
 
 
 # ----------------------------------------------------------------------
-# TAB 2: DISTRIBUTEURS & RETAILERS
+# TAB 2: DISTRIBUTEURS & RETAILERS (CANAL)
 # ----------------------------------------------------------------------
 with tab2:
     st.header("🛒 Analyse du Canal de Distribution & Risque Fournisseur")
-    st.markdown("Évaluez l'exposition de votre réseau géographique et identifiez les marques/fournisseurs les plus problématiques dans votre canal.")
 
     # --- KPI DISTRIBUTEUR ---
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total Rappels (Filtré)", total_rappels)
-    
-    # Nombre de Marques (Fournisseurs) Impactées
-    marques_impactees = df_filtered["nom_marque_du_produit"].nunique() if "nom_marque_du_produit" in df.columns else 0
-    col2.metric("Nombre de Marques Impactées", marques_impactees, help="Le nombre de marques distinctes impliquées dans les rappels sur le périmètre filtré.")
-    
-    # Risque par zone géographique
-    df_zones = explode_column(df_filtered, "zone_geographique_de_vente")
-    zone_sensible = "N/A"
-    if not df_zones.empty:
-        zone_sensible = df_zones["zone_geographique_de_vente"].value_counts().index[0].title()
-    col3.metric("Zone de Vente la Plus Sensible", zone_sensible)
-
+    col2.metric("Nombre de Marques Impactées", df_filtered["nom_marque_du_produit"].nunique() if "nom_marque_du_produit" in df.columns else 0)
+    col3.metric("Zone de Vente la Plus Sensible", explode_column(df_filtered, "zone_geographique_de_vente")["zone_geographique_de_vente"].mode()[0].title() if not explode_column(df_filtered, "zone_geographique_de_vente").empty else "N/A")
+    col4.metric("Concentration Risque Fournisseur (Top 5)", concentration_risque, help="Pourcentage des rappels provenant des 5 marques les plus problématiques.")
 
     # --- GRAPHIQUES DISTRIBUTEUR ---
+    st.markdown("### Évaluation du Risque Fournisseur et Exposition")
     col_gauche, col_droite = st.columns(2)
 
     with col_gauche:
-        st.subheader("1. Exposition Géographique : Top 10 des Zones de Vente")
-        col_name = "zone_geographique_de_vente"
-        if col_name in df_filtered.columns:
-            df_exposed = explode_column(df_filtered, col_name)
-            if not df_exposed.empty and col_name in df_exposed.columns:
-                exposure_counts = df_exposed[col_name].value_counts().reset_index().rename(columns={
-                    col_name: "Zone", 
-                    "count": "Nombre_de_Rappels"
-                }).head(10)
-                
-                fig_exposure = px.bar(exposure_counts, y="Zone", x="Nombre_de_Rappels", orientation='h', title="Fréquence de rappels par zone géographique de vente",
-                                       color='Nombre_de_Rappels', color_continuous_scale=px.colors.sequential.Viridis)
-                fig_exposure.update_layout(yaxis={'categoryorder':'total ascending'})
-                st.plotly_chart(fig_exposure, use_container_width=True)
-            else:
-                st.info("Aucune donnée de zone géographique exploitable.")
-        else:
-            st.info("Colonne de zone géographique manquante.")
-
-    with col_droite:
-        st.subheader("2. Risque Fournisseur : Top 10 des Marques (Fournisseurs)")
+        st.subheader("1. Risque Fournisseur : Top 10 Marques par Catégorie")
         col_name = "nom_marque_du_produit"
         if col_name in df_filtered.columns:
-            brand_counts = df_filtered[col_name].value_counts().reset_index().rename(columns={
-                col_name: "Marque", 
-                "count": "Nombre_de_Rappels"
-            }).head(10)
+            # Compter les occurrences de chaque marque dans la catégorie filtrée
+            brand_category_counts = df_filtered.groupby(["nom_marque_du_produit", "categorie_de_produit"]).size().reset_index(name='Nombre_de_Rappels')
+            top_10_brands = brand_category_counts.sort_values(by="Nombre_de_Rappels", ascending=False).head(10)
             
-            fig_brands = px.bar(brand_counts, x="Marque", y="Nombre_de_Rappels", title="Top 10 Marques associées aux rappels",
-                                 color='Nombre_de_Rappels', color_continuous_scale=px.colors.sequential.Plasma)
+            fig_brands = px.bar(top_10_brands, x="Nombre_de_Rappels", y="nom_marque_du_produit", orientation='h', 
+                                title="Top 10 Marques associées aux rappels (dans la catégorie sélectionnée)",
+                                color='categorie_de_produit', color_discrete_sequence=px.colors.qualitative.Bold)
+            fig_brands.update_layout(yaxis={'categoryorder':'total ascending'}, yaxis_title="Marque")
             st.plotly_chart(fig_brands, use_container_width=True)
         else:
             st.info("Aucune donnée de marque/fournisseur exploitable.")
+
+    with col_droite:
+        st.subheader("2. Tendance : Comparaison de la Fréquence de Rappel par Distributeur")
+        if distrib != "Toutes" and "date_publication" in df_filtered.columns:
+            df_trend = df.copy()
+            df_trend = df_trend[df_trend["date_publication"] >= df_filtered["date_publication"].min()]
+
+            # Total rappels du marché pour la période/catégorie
+            df_month_total = df_trend.groupby(df_trend["date_publication"].dt.to_period("M")).size().reset_index(name="Total_Marché")
+            
+            # Rappels du distributeur sélectionné
+            df_month_distrib = df_trend[df_trend["distributeurs"].str.contains(distrib, case=False, na=False, regex=True)].groupby(df_trend["date_publication"].dt.to_period("M")).size().reset_index(name=distrib.title())
+            
+            df_comp = pd.merge(df_month_total, df_month_distrib, on="date_publication", how="outer").fillna(0)
+            df_comp["date_publication"] = df_comp["date_publication"].dt.to_timestamp()
+            
+            # Calcul de la Moyenne du Marché (pour comparaison)
+            df_comp["Moyenne du Marché"] = df_comp["Total_Marché"].mean() 
+
+            fig_trend = px.line(df_comp, x="date_publication", y=[distrib.title(), "Moyenne du Marché"], 
+                                title=f"Volume de Rappels de {distrib.title()} vs. Moyenne Marché (Période)",
+                                labels={"value": "Nombre de Rappels", "date_publication": "Mois"},
+                                color_discrete_map={distrib.title(): '#2ECC71', "Moyenne du Marché": '#E74C3C'})
+            st.plotly_chart(fig_trend, use_container_width=True)
+        else:
+            st.info("Sélectionnez un distributeur dans la sidebar pour l'analyse de tendance.")
 
 
 # ----------------------------------------------------------------------
@@ -310,50 +374,69 @@ with tab2:
 # ----------------------------------------------------------------------
 with tab3:
     st.header("🔬 Évaluation de la Gravité et Tendance du Risque (Assurance & Conseil)")
-    st.markdown("Évaluez l'exposition légale et assurantielle du secteur et suivez l'évolution des risques majeurs.")
 
     # --- KPI CONFORMITÉ ---
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Risque Principal (Focus)", risque_principal)
-    col2.metric("% Rappels Microbiologiques", taux_microbien_str, help="Indicateur de la défaillance des plans HACCP et des contrôles sanitaires.")
-    col3.metric("% Rappels à Risque Grave", pc_risques_graves_str, help="Pourcentage des rappels liés à des risques sérieux (Listeria, Salmonelle, Allergènes non déclarés).")
+    col2.metric("% Rappels Microbiologiques", taux_microbien_str)
+    col3.metric("% Rappels à Risque Grave", pc_risques_graves_str)
+    col4.metric("Vitesse de Réponse Moyenne (Proxy)", vitesse_reponse, help="Durée moyenne (en jours) entre la date de commercialisation et la date de publication du rappel. Un nombre faible = détection rapide.")
 
     
     # --- GRAPHIQUES CONFORMITÉ ---
+    st.markdown("### Analyse de Gravité et Volatilité du Marché")
     col_gauche, col_droite = st.columns(2)
 
     with col_gauche:
-        st.subheader("1. Gravité : Distribution des Risques Encourus")
-        if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.columns:
-            risque_counts_top = df_risques_exploded["risques_encourus"].value_counts().reset_index().rename(columns={
-                "risques_encourus": "Risque", 
-                "count": "Nombre_de_Rappels"
-            }).head(10)
-            fig_risques = px.bar(risque_counts_top, y="Risque", x="Nombre_de_Rappels", orientation='h', title="Fréquence des principaux dangers (Listeria, Corps étrangers, Allergènes...)",
-                                 color='Nombre_de_Rappels', color_continuous_scale=px.colors.sequential.Reds)
-            fig_risques.update_layout(yaxis={'categoryorder':'total ascending'})
-            st.plotly_chart(fig_risques, use_container_width=True)
+        st.subheader("1. Corrélation : Risque vs. Catégorie (Analyse de Portefeuille)")
+        if not df_risques_exploded.empty and "categorie_de_produit" in df_filtered.columns:
+            
+            # Joindre les risques aux catégories originales (pour le filtre)
+            df_temp_risques = df_filtered.assign(risques_encourus=df_filtered['risques_encourus'].str.split(';')).explode('risques_encourus')
+            df_temp_risques['risques_encourus'] = df_temp_risques['risques_encourus'].str.strip()
+
+            risque_cat_counts = df_temp_risques.groupby(['categorie_de_produit', 'risques_encourus']).size().reset_index(name='Nombre')
+            risque_cat_counts = risque_cat_counts[risque_cat_counts['Nombre'] > 0]
+            
+            # Filtrer les top 5 risques par catégorie
+            top_risques_list = risque_cat_counts['risques_encourus'].value_counts().head(5).index
+            risque_cat_filtered = risque_cat_counts[risque_cat_counts['risques_encourus'].isin(top_risques_list)]
+
+            if not risque_cat_filtered.empty:
+                fig_bar = px.bar(risque_cat_filtered, x="categorie_de_produit", y="Nombre", color="risques_encourus", 
+                                 title="Distribution des 5 principaux risques par Catégorie de Produit",
+                                 labels={"categorie_de_produit": "Catégorie", "Nombre": "Nombre de Rappels"},
+                                 color_discrete_sequence=px.colors.qualitative.G10)
+                st.plotly_chart(fig_bar, use_container_width=True)
+            else:
+                 st.info("Pas assez de données pour générer le croisement Risque/Catégorie.")
         else:
-             st.info("Aucun risque identifiable dans les données filtrées.")
+             st.info("Données de risque et/ou de catégorie manquantes.")
 
     with col_droite:
-        st.subheader("2. Tendance : Évolution Mensuelle du Volume de Rappels")
-        if "date_publication" in df_filtered.columns:
-            df_month = df_filtered.groupby(df_filtered["date_publication"].dt.to_period("M")).size().reset_index(name="rappels")
-            if not df_month.empty:
-                df_month["date_publication"] = df_month["date_publication"].dt.to_timestamp()
-                fig_trend = px.line(df_month, x="date_publication", y="rappels", title="Volume de rappels par mois de publication",
-                                    line_shape='spline', markers=True, color_discrete_sequence=['#0083B8'])
-                st.plotly_chart(fig_trend, use_container_width=True)
-            else:
-                st.info("Aucune donnée pour générer la tendance temporelle.")
+        st.subheader("2. Tendance : Évolution des Rappels Graves vs. Mineurs")
+        if "date_publication" in df_filtered.columns and total_rappels > 0:
+            df_trend = df_filtered.copy()
+            df_trend["Type_Risque"] = np.where(df_trend["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False), 
+                                                "Risque_Grave", "Risque_Mineur/Non-classé")
+            
+            df_month_type = df_trend.groupby([df_trend["date_publication"].dt.to_period("M"), "Type_Risque"]).size().reset_index(name="Rappels")
+            df_month_type["date_publication"] = df_month_type["date_publication"].dt.to_timestamp()
+            
+            fig_trend_type = px.line(df_month_type, x="date_publication", y="Rappels", color="Type_Risque", 
+                                     title="Évolution mensuelle des Rappels Graves vs. Mineurs",
+                                     labels={"Rappels": "Volume de Rappels", "date_publication": "Mois"},
+                                     color_discrete_map={"Risque_Grave": '#E74C3C', "Risque_Mineur/Non-classé": '#F1C40F'},
+                                     line_shape='spline', markers=True)
+            st.plotly_chart(fig_trend_type, use_container_width=True)
         else:
-            st.info("Données de publication manquantes.")
+            st.info("Aucune donnée de publication ou de risque pour l'analyse de tendance.")
+
 
 st.markdown("---")
 
 # --- 6. TABLEAU DE DONNÉES DÉTAILLÉ (NETTOYAGE DU MVP) ---
-with st.expander("🔍 Voir le Registre Détaillé des Rappels (Filtré)"):
+with st.expander("🔍 Registre Détaillé des Rappels (Filtré)"):
     display_cols = [c for c in ["reference_fiche", "date_publication", "categorie_de_produit", "nom_marque_du_produit", "motif_du_rappel", "risques_encourus", "distributeurs", "zone_geographique_de_vente", "liens_vers_la_fiche_rappel"] if c in df_filtered.columns]
     
     st.dataframe(df_filtered[display_cols].sort_values(by="date_publication", ascending=False).reset_index(drop=True), use_container_width=True)
