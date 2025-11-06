@@ -23,8 +23,11 @@ keywords_recurrence_simule = ["salmonelle", "listeria", "e.coli"] # Pour la simu
 # --- NOUVELLES CONSTANTES : LOGIQUE TRAFFIC LIGHT ---
 SEUIL_VERT_MAX = 5     
 SEUIL_ORANGE_MAX = 15  
+# Seuils pour l'IPC (Indice de Pression Concurrentielle : IMR Marque / IMR Marché)
+SEUIL_IPC_BON = 0.95   # Marque fait mieux que le marché
+SEUIL_IPC_MOYEN = 1.05 # Marque fait légèrement moins bien que le marché
 
-# Fonction pour attribuer un "Traffic Light"
+# Fonction pour attribuer un "Traffic Light" à une fréquence
 def get_traffic_light(count):
     if count <= SEUIL_VERT_MAX:
         return "🟢 Faible (Green)"
@@ -33,6 +36,24 @@ def get_traffic_light(count):
     else:
         return "🔴 Critique (Red)"
 
+# Fonction pour attribuer la couleur de la flèche (delta_color)
+# 'inverse' = True si une valeur plus basse est meilleure (ex: IMR)
+def get_delta_color(value, target_threshold, inverse=False):
+    if inverse:
+        # Pour IMR : Plus bas que le seuil est Bon (Green), au-dessus est Mauvais (Red)
+        if value <= target_threshold:
+            return "normal"  # Green
+        else:
+            return "inverse" # Red
+    else:
+        # Pour IPC : Autour de 1.0 est neutre/bonne, très au-dessus est Mauvais
+        if value < SEUIL_IPC_BON:
+            return "normal" # Marque meilleure que le marché
+        elif value <= SEUIL_IPC_MOYEN:
+            return "off"    # Proche du marché (Neutre)
+        else:
+            return "inverse" # Marque moins bonne que le marché
+            
 # Charger un GeoJSON simple pour la France
 @st.cache_data(ttl=3600)
 def load_geojson():
@@ -219,41 +240,84 @@ geojson_data = load_geojson()
 if df.empty:
     st.stop()
 
-# --- SIDEBAR: FILTRES GLOBAUX ---
-st.sidebar.header("⚙️ Filtres Transversaux")
+# Gestion de l'état pour la marque sélectionnée (pour maintenir la cohérence)
+if 'selected_marque' not in st.session_state:
+    st.session_state['selected_marque'] = "Toutes"
+    
+# --- FILTRAGE PRÉLIMINAIRE PAR PÉRIODE (pour les listes déroulantes) ---
 df_temp = df.copy()
 
-distributeurs_list = safe_filter_list(df_temp, "distributeurs", exploded=True)
-motifs_list = safe_filter_list(df_temp, "motif_du_rappel")
-categories = safe_filter_list(df_temp, "categorie_de_produit")
-marques = safe_filter_list(df_temp, "nom_marque_du_produit")
+# Période
+if "date_publication" in df_temp.columns:
+    now = pd.Timestamp.now(tz='UTC') 
+    periode_options = {
+        "12 derniers mois": pd.DateOffset(months=12),
+        "6 derniers mois": pd.DateOffset(months=6),
+        "3 derniers mois": pd.DateOffset(months=3),
+        "Toute la période": None
+    }
+    
+    st.sidebar.header("⚙️ Filtres Transversaux")
+    periode = st.sidebar.selectbox("Période d'Analyse", list(periode_options.keys()))
+    
+    offset = periode_options[periode]
+    if offset:
+        df_temp = df_temp[df_temp["date_publication"] >= now - offset]
+    else:
+        # Assurez-vous que le df_temp contient toutes les dates si "Toute la période" est sélectionné
+        df_temp = df.copy() 
 
-periode = st.sidebar.selectbox("Période d'Analyse", ["12 derniers mois", "6 derniers mois", "3 derniers mois", "Toute la période"])
+# --- SIDEBAR: FILTRES GLOBAUX ---
+
+# 1. Catégorie de Produit
+categories = safe_filter_list(df_temp, "categorie_de_produit")
 cat = st.sidebar.selectbox("Catégorie de Produit", categories)
-marque = st.sidebar.selectbox("Marque (Benchmarking)", marques)
+
+# --- APPLICATION DU FILTRE CATÉGORIE POUR COHÉRENCE MARQUE ---
+df_coherence = df_temp.copy()
+if cat != "Toutes" and "categorie_de_produit" in df_coherence.columns:
+    df_coherence = df_coherence[df_coherence["categorie_de_produit"] == cat]
+    
+# 2. Marque (Benchmarking) - COHÉRENCE AVEC LA CATÉGORIE
+marques_coherentes = safe_filter_list(df_coherence, "nom_marque_du_produit")
+
+# Réinitialisation si la marque sélectionnée n'est pas dans la liste cohérente
+current_marque_selection = st.session_state['selected_marque']
+if current_marque_selection not in marques_coherentes:
+    current_marque_selection = "Toutes"
+
+marque = st.sidebar.selectbox("Marque (Benchmarking)", marques_coherentes, index=marques_coherentes.index(current_marque_selection))
+st.session_state['selected_marque'] = marque # Sauvegarde pour le prochain cycle
+
+# 3. Distributeur
+distributeurs_list = safe_filter_list(df_coherence, "distributeurs", exploded=True)
 distrib = st.sidebar.selectbox("Distributeur (Canal)", distributeurs_list)
+
+# 4. Motif
+motifs_list = safe_filter_list(df_coherence, "motif_du_rappel")
 motif = st.sidebar.selectbox("Motif de Rappel", motifs_list)
 
 
-# --- APPLICATION DES FILTRES ---
-df_filtered = df.copy()
+# --- APPLICATION FINALE DES FILTRES SUR LE DATAFRAME GLOBAL ---
+df_filtered = df.copy() 
 
-if "date_publication" in df_filtered.columns:
-    now = pd.Timestamp.now(tz='UTC') 
-    if periode == "12 derniers mois":
-        df_filtered = df_filtered[df_filtered["date_publication"] >= now - pd.DateOffset(months=12)]
-    elif periode == "6 derniers mois":
-        df_filtered = df_filtered[df_filtered["date_publication"] >= now - pd.DateOffset(months=6)]
-    elif periode == "3 derniers mois":
-        df_filtered = df_filtered[df_filtered["date_publication"] >= now - pd.DateOffset(months=3)]
+# 1. Période
+if offset:
+    df_filtered = df_filtered[df_filtered["date_publication"] >= now - offset]
 
+# 2. Catégorie
 if cat != "Toutes" and "categorie_de_produit" in df_filtered.columns:
     df_filtered = df_filtered[df_filtered["categorie_de_produit"] == cat]
+    
+# 3. Marque
 if marque != "Toutes" and "nom_marque_du_produit" in df_filtered.columns:
     df_filtered = df_filtered[df_filtered["nom_marque_du_produit"] == marque]
+    
+# 4. Motif
 if motif != "Toutes" and "motif_du_rappel" in df_filtered.columns:
     df_filtered = df_filtered[df_filtered["motif_du_rappel"] == motif]
 
+# 5. Distributeur
 if distrib != "Toutes" and "distributeurs" in df_filtered.columns:
     df_filtered = df_filtered[df_filtered["distributeurs"].str.contains(distrib, case=False, na=False)]
 
@@ -285,6 +349,7 @@ if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.c
 # Vitesse de Réponse Moyenne (Proxy) - Délai Moyen (DM)
 DM_label = "N/A"
 DM_value = 0.0
+df_temp_dates = pd.DataFrame()
 if "date_debut_commercialisation" in df_filtered.columns and not df_filtered["date_debut_commercialisation"].isnull().all():
     df_temp_dates = df_filtered.dropna(subset=["date_publication", "date_debut_commercialisation"]).copy()
     if not df_temp_dates.empty:
@@ -326,7 +391,7 @@ imr_marque, cout_marque, _ = calculate_imr(df_filtered)
 # Calcul de l'IMR pour le marché (pour la comparaison)
 imr_marche_comp = 0.0
 if "date_publication" in df.columns:
-    df_marche_comp = df[df["date_publication"] >= df_filtered["date_publication"].min()].copy()
+    df_marche_comp = df_temp.copy() # On prend le DF filtré uniquement par la Période
     imr_marche_comp, _, _ = calculate_imr(df_marche_comp)
 
 # NOUVEAU KPI: Indice de Pression Concurrentielle (IPC)
@@ -355,14 +420,19 @@ if "categorie_de_produit" in df_filtered.columns:
     df_isr = df_filtered.copy()
     if not df_isr.empty:
         _, _, avg_gravite_filtered = calculate_imr(df_isr) # 1 à 2
-        count_cat = df_isr["categorie_de_produit"].value_counts().max() if not df_isr["categorie_de_produit"].empty else 0
-        isr_value = avg_gravite_filtered * (count_cat / total_rappels) * 10 # Échelle environ 0-20
+        # Ne compter que les rappels dans la catégorie sélectionnée (si filtre actif)
+        df_cat_active = df_filtered[df_filtered["categorie_de_produit"] == cat] if cat != "Toutes" else df_filtered
+        
+        count_cat = len(df_cat_active)
+        
+        # Le calcul de l'ISR doit se faire sur le périmètre de la marque/catégorie
+        isr_value = avg_gravite_filtered * (count_cat / total_rappels) * 10 if total_rappels > 0 else 0.0
         
 # 3. Délai d'Alerte Précoce (DAP)
 dap_value = 0.0
-if DM_value > 0.0:
+if not df_temp_dates.empty:
     # Simuler le DAP comme le pourcentage de rappels avec un délai de commercialisation très court (< 7 jours)
-    dap_count = df_temp_dates[df_temp_dates["duree_commercialisation"] <= 7].shape[0] if 'df_temp_dates' in locals() and not df_temp_dates.empty else 0
+    dap_count = df_temp_dates[df_temp_dates["duree_commercialisation"] <= 7].shape[0]
     dap_value = (dap_count / total_rappels) * 100 if total_rappels > 0 else 0.0
 
 # 4. Taux d'Anomalie Logistique (TAL) - Simulé sur motifs
@@ -375,7 +445,9 @@ if total_rappels > 0 and 'motif_du_rappel' in df_filtered.columns:
 imr_std_value = 0.0
 if marque != "Toutes" and "date_publication" in df_filtered.columns:
     df_trend = df.copy()
-    df_trend = df_trend[df_trend["date_publication"] >= df_filtered["date_publication"].min()]
+    # On filtre par la période uniquement (la marque sera filtrée après)
+    if offset:
+        df_trend = df_trend[df_trend["date_publication"] >= now - offset]
     df_trend["Mois"] = df_trend["date_publication"].dt.to_period("M")
 
     def compute_imr_per_month(df_input):
@@ -413,12 +485,32 @@ if total_rappels > 0 and "risques_encourus" in df_filtered.columns:
 rro_value = 0.0
 if total_rappels > 0 and "categorie_de_produit" in df_filtered.columns:
     rappels_par_cat = df_marche_comp.groupby("categorie_de_produit").size() if 'df_marche_comp' in locals() else pd.Series()
-    if cat != "Toutes" and cat in rappels_par_cat:
-        # RRO = (IMR Marque) / (Rappels Marché dans la Catégorie)
-        rro_value = imr_marque / (rappels_par_cat[cat] / len(df_marche_comp) * 100) * 10
-    else:
-        rro_value = imr_marque * 0.5 
     
+    # Calculer l'IMR de la catégorie sur le marché filtré
+    imr_cat_marche = 0.0
+    if cat != "Toutes":
+        imr_cat_marche, _, _ = calculate_imr(df_marche_comp[df_marche_comp["categorie_de_produit"] == cat])
+    else:
+        imr_cat_marche = imr_marche_comp
+
+    if imr_cat_marche > 0 and cat != "Toutes" and cat in rappels_par_cat:
+        # RRO = (IMR Marque) / (IMR Catégorie Marché) * (Rappels Marché dans la Catégorie / Total Rappels Marché)
+        # RRO = IMR_Marque / IMR_Catégorie_Marché (Facteur de risque pur)
+        rro_value = imr_marque / imr_cat_marche 
+    else:
+        rro_value = imr_marque * 0.5 / 10
+
+
+# --- CALCUL DES COULEURS TRAFFIC LIGHT ---
+# 1. IMR de la Marque (plus bas est mieux)
+imr_marque_delta = imr_marque - (SEUIL_IMR_ALERTE / 2) # Arbitraire pour simuler une 'variation' par rapport à un objectif de 5
+imr_marque_color = get_delta_color(imr_marque, SEUIL_IMR_ALERTE, inverse=True)
+
+# 2. IPC (Indice de Pression Concurrentielle) (cible = 1.0)
+# Le delta est calculé par rapport à l'objectif 1.0
+ipc_delta = ipc_value - 1.0 
+ipc_color = get_delta_color(ipc_value, 1.0, inverse=False)
+
 
 # --- 5. STRUCTURE DU TABLEAU DE BORD PAR ACTEUR (TABS) ---
 
@@ -451,10 +543,12 @@ with tab1:
     
     # LIGNE 2 : PERFORMANCE & PROJECTION
     with col5:
-        st.metric("IMR de la Marque", f"{imr_marque:.2f}",
+        # IMR de la Marque avec Traffic Light (Bas est meilleur)
+        st.metric("IMR de la Marque", f"{imr_marque:.2f}", delta=f"Cible < {SEUIL_IMR_ALERTE}", delta_color=imr_marque_color,
             help="Indice de Maîtrise du Risque de votre marque (Score Gravité Pondéré). 🎯 **Performance :** L'objectif est de maintenir un score bas (moins de risque) et stable.")
     with col6:
-        st.metric("Indice de Pression Concurrentielle (IPC)", f"{ipc_value:.2f}", 
+        # IPC avec Traffic Light (Proche de 1.0 est meilleur)
+        st.metric("Indice de Pression Concurrentielle (IPC)", f"{ipc_value:.2f}", delta=f"Vs Cible 1.0 (Marché)", delta_color=ipc_color, 
             help="Formule : IMR Marque / IMR Marché. 📉 **Positionnement :** Un score **supérieur à 1.0** indique une **sous-performance** (votre marque est plus risquée que la moyenne du marché).")
     with col7:
         st.metric("Coût Implicite", f"{cout_marque:,.0f} €",
@@ -488,7 +582,8 @@ with tab1:
         if marque != "Toutes" and "date_publication" in df_filtered.columns:
             
             df_trend = df.copy()
-            df_trend = df_trend[df_trend["date_publication"] >= df_filtered["date_publication"].min()]
+            if offset:
+                df_trend = df_trend[df_trend["date_publication"] >= now - offset]
             df_trend["Mois"] = df_trend["date_publication"].dt.to_period("M")
 
             def compute_imr_per_month(df_input):
