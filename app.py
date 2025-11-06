@@ -12,49 +12,51 @@ st.markdown("""
 **Objectif :** Fournir des insights actionnables sur la fréquence, la gravité et l'exposition géographique des rappels.
 """)
 
-# --- FONCTION DE CHARGEMENT DE DONNÉES (Lecture CSV Standardisée) ---
+# --- FONCTION DE CHARGEMENT DE DONNÉES (Lecture CSV Standardisée & ROBUSSE) ---
 @st.cache_data(ttl=3600)
 def load_data_from_csv(file_path="rappelconso_export.csv"):
-    """Charge les données à partir d'un fichier CSV local, standardise les noms de colonnes."""
+    """Charge les données à partir d'un fichier CSV local, standardise les noms de colonnes et gère les séparateurs."""
     
     if not os.path.exists(file_path):
         st.error(f"❌ Fichier non trouvé : '{file_path}'. Veuillez vous assurer que le fichier CSV téléchargé est placé dans le même dossier que l'application et porte ce nom.")
         return pd.DataFrame()
     
+    df = pd.DataFrame()
+    
     try:
-        df = pd.read_csv(file_path, sep=",") 
+        # Tente avec le point-virgule (le plus probable pour les exports FR)
+        df = pd.read_csv(file_path, sep=";", encoding='utf-8')
         
+        # Si le point-virgule a échoué (moins de 2 colonnes), on essaie la virgule
+        if df.shape[1] <= 1:
+            st.info("Tentative de lecture avec la virgule (,) à la place du point-virgule (;).")
+            df = pd.read_csv(file_path, sep=",", encoding='utf-8')
+
+        # Si le fichier est toujours vide ou n'a qu'une colonne (malgré les tentatives)
+        if df.empty or df.shape[1] <= 1:
+            raise ValueError("Le fichier ne contient pas de données ou utilise un séparateur très inhabituel. Assurez-vous que le fichier n'est pas vide.")
+            
         # --- ÉTAPE CRITIQUE : STANDARDISATION DES NOMS DE COLONNES ---
-        # Si votre export CSV a des noms différents, ajoutez-les ici (ex: "votre_nom": "nom_attendu")
         column_mapping = {
-            # Noms souvent utilisés dans les exports RappelConso -> Noms attendus par le script
             "categorie_produit": "categorie_de_produit",
             "marque_produit": "nom_marque_du_produit",
             "motif_rappel": "motif_du_rappel",
             "numero_fiche": "reference_fiche",
             "libelle": "nom_du_produit",
-            "lien_vers_la_fiche_rappel": "liens_vers_la_fiche_rappel",
-            # Les noms suivants sont souvent déjà corrects:
-            "risques_encourus": "risques_encourus",
-            "date_publication": "date_publication",
-            "distributeurs": "distributeurs",
-            "zone_geographique_de_vente": "zone_geographique_de_vente"
+            "lien_vers_la_fiche_rappel": "liens_vers_la_fiche_rappel"
         }
         
-        # Renommage
         rename_dict = {
             old_name: new_name for old_name, new_name in column_mapping.items() 
-            if old_name in df.columns and old_name != new_name # Évite de renommer si le nom est déjà correct
+            if old_name in df.columns and old_name != new_name 
         }
         df = df.rename(columns=rename_dict)
 
-        # Diagnostic de colonnes critiques : si cela échoue, c'est que les noms sont encore différents.
         required_cols = ["categorie_de_produit", "nom_marque_du_produit", "motif_du_rappel", "distributeurs"]
         missing_cols = [c for c in required_cols if c not in df.columns]
 
         if missing_cols:
             st.error(f"⚠️ Alerte Colonnes : Les filtres affichent seulement 'Tous' car les colonnes critiques sont manquantes : **{', '.join(missing_cols)}**.")
-            st.warning("👉 **Action requise :** Votre CSV n'utilise pas les noms standards. Veuillez modifier la `column_mapping` dans la fonction `load_data_from_csv` avec les noms exacts. Vos colonnes sont : " + ", ".join(df.columns.tolist()))
             st.stop()
             
         # 1. Conversion de la date
@@ -78,7 +80,7 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
         return df
 
     except Exception as e:
-        st.error(f"❌ Erreur lors de la lecture du fichier CSV : {e}")
+        st.error(f"❌ Erreur critique lors de la lecture du fichier CSV. Cause possible : Fichier vide ou encodage incorrect. Message : {e}")
         return pd.DataFrame()
 
 
