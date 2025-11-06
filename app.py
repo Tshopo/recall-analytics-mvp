@@ -267,8 +267,13 @@ if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.c
     if not risque_counts.empty:
         risque_major = next(iter(risque_counts.index), None)
         if risque_major:
-            risque_principal = risque_major.title()
-
+            # --- MODIFICATION ICI : Tronque le texte si "Listeria Monocytogenes" est présent ---
+            if "listeria monocytogenes" in risque_major.lower():
+                risque_principal = "Listeria Monocytogenes"
+            else:
+                risque_principal = risque_major.title()
+            # --- FIN MODIFICATION ---
+    
 # Vitesse de Réponse Moyenne (Proxy)
 vitesse_reponse = "N/A"
 if "date_debut_commercialisation" in df_filtered.columns and not df_filtered["date_debut_commercialisation"].isnull().all():
