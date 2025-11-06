@@ -55,7 +55,7 @@ def load_geojson():
             st.sidebar.error(f"Erreur lors du chargement du GeoJSON : {e}")
             return None
     else:
-        #st.sidebar.warning(f"Fichier GeoJSON '{geojson_path}' non trouvé.")
+        # st.sidebar.warning(f"Fichier GeoJSON '{geojson_path}' non trouvé.")
         return None
 
 # --- 1. CONFIGURATION ET MISE EN PAGE GLOBALE ---
@@ -285,7 +285,6 @@ else:
 
 tab1, tab2, tab3 = st.tabs(["🏭 Fabricants & Marques", "🛒 Distributeurs & Retailers", "🔬 Risque & Conformité"])
 
-
 # ----------------------------------------------------------------------
 # TAB 1: FABRICANTS & MARQUES (BENCHMARKING IMR & RISQUE FOURNISSEUR)
 # ----------------------------------------------------------------------
@@ -427,10 +426,9 @@ with tab1:
          else:
              st.info("Colonnes de risque et/ou de motif manquantes pour la matrice.")
 
+---
+# 🛒 Distributeurs & Retailers
 
-# ----------------------------------------------------------------------
-# TAB 2: DISTRIBUTEURS & RETAILERS (MATRICE DE RISQUE LOGISTIQUE & GÉOSPATIALITÉ)
-# ----------------------------------------------------------------------
 with tab2:
     st.header("🛒 Analyse du Canal de Distribution & Risque Logistique")
 
@@ -525,9 +523,7 @@ with tab2:
         df_geo = explode_column(df_filtered, "zone_geographique_de_vente")
         
         # Tentative d'extraction du code départemental/régional (très simplifié)
-        # On essaie d'abord d'extraire des nombres à 2 ou 3 chiffres (code départemental/postal)
         df_geo['zone_clean'] = df_geo['zone_geographique_de_vente'].str.extract(r'(\d{2,3})') 
-        # Si échec, on prend le premier mot (pour les noms de régions/villes)
         df_geo.loc[df_geo['zone_clean'].isna(), 'zone_clean'] = df_geo.loc[df_geo['zone_clean'].isna(), 'zone_geographique_de_vente'].str.split('-').str[0].str.strip()
         df_geo = df_geo.dropna(subset=['zone_clean'])
         
@@ -541,36 +537,47 @@ with tab2:
             # Affichage de la carte Choropleth si GeoJSON disponible (avec attribution de couleur)
             if geojson_data:
                 
+                st.info("✅ GeoJSON détecté. Affichage de la carte de risque géospatial.")
+                
                 # Attribuer les couleurs pour la carte Plotly
                 def get_plotly_color(count):
-                    if count <= SEUIL_VERT_MAX: return 'green'
-                    elif count <= SEUIL_ORANGE_MAX: return 'orange'
-                    else: return 'red'
+                    if count <= SEUIL_VERT_MAX: return '#2ECC71' # Green
+                    elif count <= SEUIL_ORANGE_MAX: return '#F39C12' # Orange
+                    else: return '#E74C3C' # Red
                 
-                geo_counts['Couleur'] = geo_counts['Nombre_Rappels'].apply(get_plotly_color)
+                geo_counts['Couleur_Hex'] = geo_counts['Nombre_Rappels'].apply(get_plotly_color)
                 
                 try:
-                    # Le champ 'properties.code' doit correspondre au champ d'ID du GeoJSON
+                    # Pour utiliser une carte choroplèthe, Plotly a besoin d'une colonne 'color' 
+                    # et d'une mapping du GeoJSON (featureidkey) vers les valeurs 'locations'
+                    
                     fig_map = px.choropleth(geo_counts,
                                             geojson=geojson_data,
                                             locations='zone_clean',
+                                            # ATTENTION : 'properties.code' est l'identifiant standard pour les codes départementaux. 
+                                            # Modifiez-le si votre GeoJSON utilise un autre champ (ex: 'properties.nom')
                                             featureidkey="properties.code", 
-                                            color='Couleur', 
-                                            color_discrete_map={'green': '#2ECC71', 'orange': '#F39C12', 'red': '#E74C3C'},
+                                            color='Nombre_Rappels', # Colorez par le nombre pour la légende
+                                            hover_name='zone_clean',
+                                            color_continuous_scale=["#2ECC71", "#F39C12", "#E74C3C"], # Vert-Orange-Rouge
+                                            range_color=[0, SEUIL_ORANGE_MAX + 1], 
                                             scope='europe', 
                                             title="Répartition Géospatiale du Risque (Traffic Light)",
                                             height=500)
+                    
                     fig_map.update_geos(fitbounds="locations", visible=False)
+                    
+                    # Cacher la légende pour forcer l'interprétation Green/Amber/Red
+                    fig_map.update_layout(coloraxis_showscale=False) 
+                    
                     st.plotly_chart(fig_map, use_container_width=True)
                 except Exception as e:
-                    st.warning(f"⚠️ Impossible d'afficher la carte Choropleth : {e}. Vérifiez la correspondance des codes dans le GeoJSON.")
-                    st.info("Affichage du tableau de bord Traffic Light par Zone de Vente (Méthode de repli).")
+                    st.warning(f"⚠️ Impossible d'afficher la carte Choropleth (Erreur Plotly : {e}). Vérifiez la correspondance des codes dans le GeoJSON (notamment featureidkey).")
                     
                     # Affichage du tableau de bord Traffic Light (Méthode de repli)
                     st.dataframe(geo_counts[['zone_clean', 'Nombre_Rappels', 'Niveau_Risque']].rename(columns={
                         'zone_clean': 'Zone Géographique', 
                         'Nombre_Rappels': 'Nbre de Rappels'
-                    # Correction du KeyError : trier par le nom de colonne renommé
                     }).sort_values(by='Nbre de Rappels', ascending=False), 
                     hide_index=True, use_container_width=True)
 
@@ -583,7 +590,7 @@ with tab2:
                 st.dataframe(geo_counts[['zone_clean', 'Nombre_Rappels', 'Niveau_Risque']].rename(columns={
                     'zone_clean': 'Zone Géographique', 
                     'Nombre_Rappels': 'Nbre de Rappels'
-                # Correction du KeyError : trier par le nom de colonne renommé
+                # Correction du KeyError appliquée ici : trier par le nom de colonne renommé 'Nbre de Rappels'
                 }).sort_values(by='Nbre de Rappels', ascending=False), 
                 hide_index=True, use_container_width=True)
                 
@@ -592,10 +599,9 @@ with tab2:
     else:
         st.info("Colonne 'zone_geographique_de_vente' manquante pour l'analyse géospatiale.")
 
+---
+# 🔬 Risque & Conformité
 
-# ----------------------------------------------------------------------
-# TAB 3: RISQUE & CONFORMITÉ (DÉRIVE DES CAUSES RACINES & PROFIL DE RISQUE)
-# ----------------------------------------------------------------------
 with tab3:
     st.header("🔬 Évaluation de la Gravité et Tendance du Risque (Assurance & Conseil)")
 
