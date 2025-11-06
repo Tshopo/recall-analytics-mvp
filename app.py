@@ -35,7 +35,6 @@ def load_geojson():
     Tente de charger un fichier GeoJSON pour la cartographie.
     Si le fichier est manquant ou non supporté, retourne None.
     """
-    # *** Le fichier GeoJSON doit être nommé EXACTEMENT 'departements.geojson' ***
     geojson_path = "departements.geojson" 
     
     if os.path.exists(geojson_path):
@@ -48,12 +47,47 @@ def load_geojson():
             st.sidebar.error(f"Erreur lors du chargement du GeoJSON : {e}")
             return None
     else:
-        # Retourne None si le fichier n'est pas trouvé
         return None
 
 # --- 1. CONFIGURATION ET MISE EN PAGE GLOBALE ---
 st.set_page_config(page_title="Recall Analytics (RappelConso) - B2B PRO", layout="wide", initial_sidebar_state="expanded")
 st.title("🛡️ Recall Analytics — Dashboard d'Intelligence Marché (B2B PRO) - Vue Stratégie DS")
+
+# --- CSS INJECTION POUR L'ESTHÉTIQUE, LA POLICE ET LA SÉPARATION ---
+st.markdown("""
+<style>
+/* Réduit la taille de la police des labels et valeurs st.metric pour plus de compacité */
+div[data-testid="stMetricValue"] {
+    font-size: 1.8rem; /* Taille de la valeur (ex: 15659) */
+    font-weight: 700;
+}
+div[data-testid="stMetricLabel"] > div {
+    font-size: 0.8rem; /* Taille du label (ex: Total Rappels (Périmètre)) */
+    font-weight: 600;
+    opacity: 0.8;
+}
+
+/* Style général pour les conteneurs des KPI (crée une 'case' pour chaque indicateur) */
+.kpi-container {
+    padding: 10px 10px;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+    margin-bottom: 10px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+    background-color: #FFFFFF; /* Assure un fond blanc dans la box si le fond de l'onglet est gris */
+}
+
+/* Sépare visuellement les différentes sections (onglets) lors du scroll en donnant un fond léger */
+.stTabs [data-testid="stVerticalBlock"] {
+    padding-top: 20px;
+    padding-bottom: 20px;
+    background-color: #F8F8F8; /* Gris très léger pour contraster avec le fond de page */
+    border-radius: 5px;
+}
+
+</style>
+""", unsafe_allow_html=True)
+# --- FIN DE L'AJOUT CSS ---
 
 st.markdown("""
 **Focus DS :** Intégration des **Coûts Stratégiques Simulé**, **Indicateurs Denses** et **Analyse Géospatiale**.
@@ -285,13 +319,29 @@ tab1, tab2, tab3 = st.tabs(["🏭 Fabricants & Marques", "🛒 Distributeurs & R
 with tab1:
     st.header("🎯 Intelligence Concurrentielle & Maîtrise du Risque Fournisseur")
 
-    # --- KPI FABRICANT ---
+    # --- KPI FABRICANT (Utilisation des conteneurs pour le style) ---
     col1, col2, col3, col4, col5, col6 = st.columns(6)
-    col1.metric("Total Rappels (Périmètre)", total_rappels)
-    col2.metric("IMR de la Marque", f"{imr_marque:.2f}")
-    col3.metric("IMR du Marché", f"{imr_marche_comp:.2f}")
-    col4.metric("Coût Implicite", f"{cout_marque:,.0f} €")
-    col5.metric("Risque Principal", risque_principal)
+    
+    with col1:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        st.metric("Total Rappels (Périmètre)", total_rappels)
+        st.markdown('</div>', unsafe_allow_html=True)
+    with col2:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        st.metric("IMR de la Marque", f"{imr_marque:.2f}")
+        st.markdown('</div>', unsafe_allow_html=True)
+    with col3:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        st.metric("IMR du Marché", f"{imr_marche_comp:.2f}")
+        st.markdown('</div>', unsafe_allow_html=True)
+    with col4:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        st.metric("Coût Implicite", f"{cout_marque:,.0f} €")
+        st.markdown('</div>', unsafe_allow_html=True)
+    with col5:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        st.metric("Risque Principal", risque_principal)
+        st.markdown('</div>', unsafe_allow_html=True)
     
     # NOUVEAU KPI: Taux de Non-Conformité Fournisseur (NCF)
     if 'identifiant_de_l_etablissement_d_ou_provient_le_produit' in df_filtered.columns:
@@ -301,14 +351,18 @@ with tab1:
         total_fournisseurs_impactes = 0 
 
     total_fournisseurs_t1 = 30 
-    if total_fournisseurs_t1 > 0 and 'identifiant_de_l_etablissement_d_ou_provient_le_produit' in df_filtered.columns:
-        taux_ncf = (total_fournisseurs_impactes / total_fournisseurs_t1) * 100
-        col6.metric("NCF T1 (Simulé)", f"{taux_ncf:.1f}%", help="Taux de Non-Conformité Fournisseur : % des fournisseurs T1 impliqués dans au moins 1 rappel.")
-    else:
-        col6.metric("NCF T1 (Simulé)", "N/A", help="Données d'identification fournisseur manquantes pour le calcul précis.")
+    with col6:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        if total_fournisseurs_t1 > 0 and 'identifiant_de_l_etablissement_d_ou_provient_le_produit' in df_filtered.columns:
+            taux_ncf = (total_fournisseurs_impactes / total_fournisseurs_t1) * 100
+            st.metric("NCF T1 (Simulé)", f"{taux_ncf:.1f}%", help="Taux de Non-Conformité Fournisseur : % des fournisseurs T1 impliqués dans au moins 1 rappel.")
+        else:
+            st.metric("NCF T1 (Simulé)", "N/A", help="Données d'identification fournisseur manquantes pour le calcul précis.")
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
     st.markdown("### Analyse de Positionnement et Causes Racines")
+    st.markdown("---") # Séparation visuelle
     col_gauche, col_droite = st.columns(2)
 
     with col_gauche:
@@ -427,28 +481,48 @@ with tab1:
 with tab2:
     st.header("🛒 Analyse du Canal de Distribution & Risque Logistique")
 
-    # --- KPI DISTRIBUTEUR ---
+    # --- KPI DISTRIBUTEUR (Utilisation des conteneurs pour le style) ---
     col1, col2, col3, col4, col5, col6 = st.columns(6)
-    col1.metric("Total Rappels (Filtré)", total_rappels)
-    col2.metric("Délai Moyen (Marché)", vitesse_reponse)
-    col3.metric("Coût Logistique Max/Distributeur", f"{COUT_LOGISTIQUE_JOUR_SUPP:,.0f} € / Jour")
-    col4.metric("% Rappels à Risque Grave", pc_risques_graves_str)
+    
+    with col1:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        st.metric("Total Rappels (Filtré)", total_rappels)
+        st.markdown('</div>', unsafe_allow_html=True)
+    with col2:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        st.metric("Délai Moyen (Marché)", vitesse_reponse)
+        st.markdown('</div>', unsafe_allow_html=True)
+    with col3:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        st.metric("Coût Logistique Max/Distributeur", f"{COUT_LOGISTIQUE_JOUR_SUPP:,.0f} € / Jour")
+        st.markdown('</div>', unsafe_allow_html=True)
+    with col4:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        st.metric("% Rappels à Risque Grave", pc_risques_graves_str)
+        st.markdown('</div>', unsafe_allow_html=True)
     
     # NOUVEAU KPI 1 : Densité Distributeurs
-    if "distributeurs" in df_filtered.columns:
-        df_distrib_exploded = explode_column(df_filtered, 'distributeurs')
-        distrib_counts = df_distrib_exploded['distributeurs'].value_counts()
-        densite_distrib = distrib_counts.mean() if not distrib_counts.empty else 0.0
-        col5.metric("Densité Moy. Rappel/Distributeur", f"{densite_distrib:.1f}")
-    else:
-        col5.metric("Densité Moy. Rappel/Distributeur", "N/A")
+    with col5:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        if "distributeurs" in df_filtered.columns:
+            df_distrib_exploded = explode_column(df_filtered, 'distributeurs')
+            distrib_counts = df_distrib_exploded['distributeurs'].value_counts()
+            densite_distrib = distrib_counts.mean() if not distrib_counts.empty else 0.0
+            st.metric("Densité Moy. Rappel/Distributeur", f"{densite_distrib:.1f}")
+        else:
+            st.metric("Densité Moy. Rappel/Distributeur", "N/A")
+        st.markdown('</div>', unsafe_allow_html=True)
         
     # NOUVEAU KPI 2 : Taux de Couverture du Rappel (TCR) (Simulé)
-    taux_couverture_rappel = 85.0
-    col6.metric("Taux de Couverture du Rappel (Simulé)", f"{taux_couverture_rappel:.1f}%", help="KPI Simulé : % des zones géographiques couvertes par une action de retrait documentée (cible : 95%).")
+    with col6:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        taux_couverture_rappel = 85.0
+        st.metric("Taux de Couverture du Rappel (Simulé)", f"{taux_couverture_rappel:.1f}%", help="KPI Simulé : % des zones géographiques couvertes par une action de retrait documentée (cible : 95%).")
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
     st.markdown("### 1. Matrice de Priorisation du Risque Distributeur (Bubble Chart)")
+    st.markdown("---") # Séparation visuelle
     
     if "date_debut_commercialisation" in df_filtered.columns and "distributeurs" in df_filtered.columns:
             
@@ -510,7 +584,7 @@ with tab2:
         st.info("Colonnes de date de commercialisation et/ou distributeurs manquantes.")
         
     
-    st.markdown("---")
+    st.markdown("---") # Séparation visuelle
     st.subheader("2. Score de Risque Géographique (Traffic Light) ")
     st.caption(f"Seuils : 🟢 0-{SEUIL_VERT_MAX} rappels, 🟠 {SEUIL_VERT_MAX+1}-{SEUIL_ORANGE_MAX} rappels, 🔴 >{SEUIL_ORANGE_MAX} rappels.")
 
@@ -552,9 +626,8 @@ with tab2:
                                             hover_name='zone_clean',
                                             color_continuous_scale=["#2ECC71", "#F39C12", "#E74C3C"], 
                                             range_color=[0, SEUIL_ORANGE_MAX + 1], 
-                                            # scope='europe', # Laisser commenté ou supprimer pour permettre le centrage
                                             title="Répartition Géospatiale du Risque (Traffic Light)",
-                                            height=2000) # HAUTEUR AJUSTÉE DE 500 À 1000
+                                            height=1000) # HAUTEUR AJUSTÉE POUR AGRANDIR LA CARTE
                     
                     fig_map.update_geos(
                         fitbounds="locations", 
@@ -599,39 +672,59 @@ with tab2:
 with tab3:
     st.header("🔬 Évaluation de la Gravité et Tendance du Risque (Assurance & Conseil)")
 
-    # --- KPI CONFORMITÉ ---
+    # --- KPI CONFORMITÉ (Utilisation des conteneurs pour le style) ---
     col1, col2, col3, col4, col5, col6 = st.columns(6)
-    col1.metric("Risque Principal", risque_principal)
-    col2.metric("% Rappels Graves", pc_risques_graves_str)
-    col3.metric("Délai Moyen Commercialisation", vitesse_reponse)
     
-    df_vol = df_filtered.groupby(df_filtered["date_publication"].dt.to_period("M")).size().reset_index(name="Rappels")
-    volatilite = df_vol["Rappels"].std() if not df_vol.empty and len(df_vol) > 1 else 0
-    col4.metric("Volatilité Mensuelle", f"{volatilite:.1f}")
+    with col1:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        st.metric("Risque Principal", risque_principal)
+        st.markdown('</div>', unsafe_allow_html=True)
+    with col2:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        st.metric("% Rappels Graves", pc_risques_graves_str)
+        st.markdown('</div>', unsafe_allow_html=True)
+    with col3:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        st.metric("Délai Moyen Commercialisation", vitesse_reponse)
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        df_vol = df_filtered.groupby(df_filtered["date_publication"].dt.to_period("M")).size().reset_index(name="Rappels")
+        volatilite = df_vol["Rappels"].std() if not df_vol.empty and len(df_vol) > 1 else 0
+        st.metric("Volatilité Mensuelle", f"{volatilite:.1f}")
+        st.markdown('</div>', unsafe_allow_html=True)
     
     # NOUVEAU KPI 1 : Diversité des Risques
-    if not df_risques_exploded.empty:
-        diversite_risques = df_risques_exploded['risques_encourus'].nunique()
-        col5.metric("Diversité des Risques", diversite_risques, help="Nombre de types de risques encourus différents identifiés dans la période (e.g. Bactérie, Physique, Allergène).")
-    else:
-        col5.metric("Diversité des Risques", "N/A")
+    with col5:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        if not df_risques_exploded.empty:
+            diversite_risques = df_risques_exploded['risques_encourus'].nunique()
+            st.metric("Diversité des Risques", diversite_risques, help="Nombre de types de risques encourus différents identifiés dans la période (e.g. Bactérie, Physique, Allergène).")
+        else:
+            st.metric("Diversité des Risques", "N/A")
+        st.markdown('</div>', unsafe_allow_html=True)
         
     # NOUVEAU KPI 2 : Risque Moyen Pondéré par Catégorie (RMPC) - Simulation
-    if "motif_du_rappel" in df_filtered.columns and "risques_encourus" in df_filtered.columns and not df_filtered.empty:
-        df_temp_imr = df_filtered.copy()
-        df_temp_imr["is_risque_grave"] = df_temp_imr["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
-        df_temp_imr['score_gravite'] = np.where(df_temp_imr['is_risque_grave'], 2, 1)
+    with col6:
+        st.markdown('<div class="kpi-container">', unsafe_allow_html=True)
+        if "motif_du_rappel" in df_filtered.columns and "risques_encourus" in df_filtered.columns and not df_filtered.empty:
+            df_temp_imr = df_filtered.copy()
+            df_temp_imr["is_risque_grave"] = df_temp_imr["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
+            df_temp_imr['score_gravite'] = np.where(df_temp_imr['is_risque_grave'], 2, 1)
 
-        motif_graves = df_temp_imr.groupby('motif_du_rappel')['score_gravite'].mean().reset_index()
-        top_motifs_graves = motif_graves.sort_values(by='score_gravite', ascending=False).head(1)
-        
-        rmpc = top_motifs_graves['score_gravite'].mean() * 10 if not top_motifs_graves.empty else 0.0
-        col6.metric("RMPC (Simulé)", f"{rmpc:.2f}", help="Risque Moyen Pondéré par Catégorie : Gravité moyenne des motifs principaux (échelle de 0 à 20).")
-    else:
-        col6.metric("RMPC (Simulé)", "N/A")
+            motif_graves = df_temp_imr.groupby('motif_du_rappel')['score_gravite'].mean().reset_index()
+            top_motifs_graves = motif_graves.sort_values(by='score_gravite', ascending=False).head(1)
+            
+            rmpc = top_motifs_graves['score_gravite'].mean() * 10 if not top_motifs_graves.empty else 0.0
+            st.metric("RMPC (Simulé)", f"{rmpc:.2f}", help="Risque Moyen Pondéré par Catégorie : Gravité moyenne des motifs principaux (échelle de 0 à 20).")
+        else:
+            st.metric("RMPC (Simulé)", "N/A")
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
     st.markdown("### 1. Tendance : Dérive des Causes Racines (DCR) - Taux d'Émergence des Motifs")
+    st.markdown("---") # Séparation visuelle
     
     if "date_publication" in df_filtered.columns and "motif_du_rappel" in df_filtered.columns:
         
@@ -678,7 +771,7 @@ with tab3:
     else:
         st.info("Colonnes manquantes pour l'analyse des motifs.")
 
-    st.markdown("---")
+    st.markdown("---") # Séparation visuelle
     st.subheader("2. Profil de Risque (Radar Chart RMPC)")
     
     if "categorie_de_produit" in df_filtered.columns and "risques_encourus" in df_filtered.columns:
