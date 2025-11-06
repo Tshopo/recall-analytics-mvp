@@ -64,7 +64,7 @@ div[data-testid="stMetric"] {
     border: 1px solid #e0e0e0; /* Bordure légère */
     margin-bottom: 10px; /* Espace sous chaque métrique */
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05); /* Ombre légère */
-    min-height: 90px; /* Hauteur minimale pour mieux contenir le texte */
+    min-height: 100px; /* **Augmenté : Hauteur minimale pour mieux contenir le texte** */
     display: flex; /* Utilise flexbox pour un meilleur alignement interne */
     flex-direction: column; /* Organise label et valeur verticalement */
     justify-content: center; /* Centre verticalement le contenu */
@@ -73,21 +73,23 @@ div[data-testid="stMetric"] {
 
 /* Réduit la taille de la police des valeurs st.metric */
 div[data-testid="stMetricValue"] {
-    font-size: 1.5rem; /* Taille de la valeur (ex: 15659) - Réduit */
+    font-size: 1.3rem; /* **Réduit encore : Taille de la valeur (ex: 15659)** */
     font-weight: 700;
     white-space: normal; /* Permet au texte de s'enrouler */
     overflow: hidden; /* Cache le texte qui déborde */
     text-overflow: ellipsis; /* Ajoute des points de suspension si le texte est coupé */
+    line-height: 1.2; /* Ajuste l'espacement entre les lignes si le texte s'enroule */
 }
 
 /* Réduit la taille de la police des labels st.metric */
 div[data-testid="stMetricLabel"] > div {
-    font-size: 0.7rem; /* Taille du label (ex: Total Rappels (Périmètre)) - Réduit */
+    font-size: 0.65rem; /* **Réduit encore : Taille du label (ex: Total Rappels (Périmètre))** */
     font-weight: 600;
     opacity: 0.8;
     white-space: normal; /* Permet au texte de s'enrouler */
     overflow: hidden;
     text-overflow: ellipsis;
+    line-height: 1.2; /* Ajuste l'espacement entre les lignes */
 }
 
 /* Sépare visuellement les différentes sections (onglets) lors du scroll en donnant un fond léger */
