@@ -554,7 +554,7 @@ with tab2:
                                             range_color=[0, SEUIL_ORANGE_MAX + 1], 
                                             # scope='europe', # Laisser commenté ou supprimer pour permettre le centrage
                                             title="Répartition Géospatiale du Risque (Traffic Light)",
-                                            height=1500) # HAUTEUR AJUSTÉE DE 500 À 1000
+                                            height=2000) # HAUTEUR AJUSTÉE DE 500 À 1000
                     
                     fig_map.update_geos(
                         fitbounds="locations", 
