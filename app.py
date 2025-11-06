@@ -12,6 +12,7 @@ COUT_RAPPEl_GRAVE_UNITAIRE = 50000.0  # Coût estimé d'un rappel impliquant un 
 COUT_RAPPEl_MINEUR_UNITAIRE = 5000.0   # Coût estimé d'un rappel mineur (défaut d'étiquetage simple)
 COUT_LOGISTIQUE_JOUR_SUPP = 500.0      # Coût logistique / jour pour chaque distributeur après le délai "normal"
 SEUIL_IMR_ALERTE = 10.0                # Seuil à partir duquel un IMR est considéré critique
+risques_graves_keywords = "listeriose|salmonellose|e\.coli|blessures|allergene non declare|corps étranger" # Rendu global pour les fonctions
 
 # --- 1. CONFIGURATION ET MISE EN PAGE GLOBALE ---
 # ATTENTION: Correction de l'erreur st.set_page_page_config -> st.set_page_config
@@ -167,9 +168,6 @@ if distrib != "Toutes" and "distributeurs" in df_filtered.columns:
 total_rappels = len(df_filtered)
 df_risques_exploded = explode_column(df_filtered, "risques_encourus")
 
-# Définition des risques graves (pour les calculs financiers)
-risques_graves_keywords = "listeriose|salmonellose|e\.coli|blessures|allergene non declare|corps étranger"
-df_filtered["is_risque_grave"] = df_filtered["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
 
 # Risque principal
 risque_principal = "N/A"
@@ -179,15 +177,6 @@ if not df_risques_exploded.empty and "risques_encourus" in df_risques_exploded.c
         risque_major = next(iter(risque_counts.index), None)
         if risque_major:
             risque_principal = risque_major.title()
-
-# % de Rappels graves
-pc_risques_graves = 0.0
-if total_rappels > 0:
-    count_graves = df_filtered["is_risque_grave"].sum()
-    pc_risques_graves = (count_graves / total_rappels * 100)
-    pc_risques_graves_str = f"{pc_risques_graves:.1f}%"
-else:
-    pc_risques_graves_str = "N/A"
 
 # Vitesse de Réponse Moyenne (Proxy)
 vitesse_reponse = "N/A"
@@ -206,6 +195,12 @@ def calculate_imr(df_calc):
         return 0.0, 0.0
 
     df_imr = df_calc.copy()
+    
+    # FIX : S'assurer que 'is_risque_grave' est calculé si la colonne 'risques_encourus' est présente
+    if 'risques_encourus' in df_imr.columns:
+         df_imr["is_risque_grave"] = df_imr["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
+    else:
+        return 0.0, 0.0
     
     # 1. Calcul du Score de Gravité pour chaque rappel
     df_imr['score_gravite'] = np.where(df_imr['is_risque_grave'], 2, 1) # Risque grave = poids 2, mineur = poids 1
@@ -231,6 +226,14 @@ def calculate_imr(df_calc):
 
 # Calcul de l'IMR pour la marque filtrée
 imr_marque, cout_marque = calculate_imr(df_filtered)
+
+# Calcul du % Rappels graves (utilisation de la même logique sans appeler calculate_imr)
+if total_rappels > 0:
+    count_graves = df_filtered["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False).sum()
+    pc_risques_graves = (count_graves / total_rappels * 100)
+    pc_risques_graves_str = f"{pc_risques_graves:.1f}%"
+else:
+    pc_risques_graves_str = "N/A"
 
 # Calcul de l'IMR pour le marché (pour la comparaison)
 df_marche_comp = df[df["date_publication"] >= df_filtered["date_publication"].min()].copy()
@@ -284,7 +287,12 @@ with tab1:
             df_trend["Mois"] = df_trend["date_publication"].dt.to_period("M")
 
             def compute_imr_per_month(df_input):
-                df_input['is_risque_grave'] = df_input["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
+                # FIX : S'assurer que 'is_risque_grave' est calculé dans cette fonction
+                if 'risques_encourus' in df_input.columns:
+                    df_input['is_risque_grave'] = df_input["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
+                else:
+                    return pd.DataFrame()
+                    
                 df_input['score_gravite'] = np.where(df_input['is_risque_grave'], 2, 1)
                 
                 imr_monthly = df_input.groupby('Mois').agg(
@@ -376,7 +384,12 @@ with tab2:
         # 2. Calculer le Délai et la Gravité
         df_reponse["Délai_Jours"] = (df_reponse["date_publication"] - df_reponse["date_debut_commercialisation"]).dt.days
         df_reponse = df_reponse[df_reponse["Délai_Jours"] >= 0]
-        df_reponse['Score_Gravite'] = np.where(df_reponse['is_risque_grave'], 2, 1) # 2x plus important si Grave
+        # FIX : Calculer is_risque_grave ici pour le score
+        if 'risques_encourus' in df_reponse.columns:
+            df_reponse['is_risque_grave'] = df_reponse["risques_encourus"].str.contains(risques_graves_keywords, case=False, na=False)
+            df_reponse['Score_Gravite'] = np.where(df_reponse['is_risque_grave'], 2, 1) # 2x plus important si Grave
+        else:
+            df_reponse['Score_Gravite'] = 1
         
         # 3. Agrégation par Distributeur
         avg_distrib = df_reponse.groupby("distributeurs").agg(
