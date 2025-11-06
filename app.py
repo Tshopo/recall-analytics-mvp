@@ -438,30 +438,30 @@ with tab1:
     # LIGNE 1 : PRESSION & CONTEXTE
     with col1:
         st.metric("Total Rappels (Périmètre)", total_rappels, 
-            help="Nombre total de fiches de rappel publiées, tenant compte de la période et des filtres sélectionnés. Mesure la **pression volume**.")
+            help="Nombre total de fiches de rappel publiées, tenant compte de la période et des filtres sélectionnés. 📈 **Message :** Mesure la **pression volume** globale.")
     with col2:
         st.metric("IMR du Marché", f"{imr_marche_comp:.2f}",
-            help="Indice de Maîtrise du Risque (IMR) calculé sur l'ensemble des marques dans la période filtrée. Permet le benchmark.")
+            help="Indice de Maîtrise du Risque (IMR) calculé sur l'ensemble des marques dans la période filtrée. 📊 **Benchmark :** Point de référence pour évaluer la performance de votre marque.")
     with col3:
         st.metric("Risque Principal", risque_principal,
-            help="Le risque encouru (ex: Listeria, Corps étranger) le plus fréquemment mentionné dans les rappels filtrés.")
+            help="Le risque encouru le plus fréquemment mentionné. ⚠️ **Priorité :** Indique le danger sanitaire ou physique majeur à adresser en priorité.")
     with col4:
         st.metric("Taux d'Impact Fournisseur Critique (TIFC)", f"{tifc_value:.1f}%",
-            help="**LEVIER PRESSION FOURNISSEUR** : Proportion des rappels dont la cause racine est liée à une non-conformité fournisseur (matière première, étiquetage, etc.). **Formule : (Nbre Rappels Cause Fournisseur / Total Rappels) * 100**.")
+            help="Proportion des rappels dont la cause est liée à une non-conformité fournisseur. 🚨 **Contrôle :** Un TIFC élevé suggère des audits fournisseurs insuffisants ou une faible spécification d'achat.")
     
     # LIGNE 2 : PERFORMANCE & PROJECTION
     with col5:
         st.metric("IMR de la Marque", f"{imr_marque:.2f}",
-            help="**LEVIER PERFORMANCE QUALITÉ** : Indice de Maîtrise du Risque (IMR). Formule : (Somme des Scores de Gravité / Nbre total de rappels) * 10. (Gravité = 2 pour risque grave, 1 pour risque mineur). Échelle 0-20.")
+            help="Indice de Maîtrise du Risque de votre marque (Score Gravité Pondéré). 🎯 **Performance :** L'objectif est de maintenir un score bas (moins de risque) et stable.")
     with col6:
         st.metric("Indice de Pression Concurrentielle (IPC)", f"{ipc_value:.2f}", 
-            help="**LEVIER PERFORMANCE BENCHMARK** : Évalue votre position face à la concurrence. **Formule : IMR de la Marque / IMR du Marché**. Un score > 1.0 indique une sous-performance (plus de risque).")
+            help="Formule : IMR Marque / IMR Marché. 📉 **Positionnement :** Un score **supérieur à 1.0** indique une **sous-performance** (votre marque est plus risquée que la moyenne du marché).")
     with col7:
         st.metric("Coût Implicite", f"{cout_marque:,.0f} €",
-            help="Coût de rappel simulé. Formule : (Nbre Rappels Graves x 50.000 €) + (Nbre Rappels Mineurs x 5.000 €).")
+            help="Coût de rappel simulé (Graves x 50K€ + Mineurs x 5K€). 💰 **Impact :** Chiffre la perte financière minimale due à la crise.")
     with col8:
         st.metric("Indice de Sévérité du Risque (ISR)", f"{isr_value:.2f}",
-            help="**LEVIER PROJECTION CATÉGORIE** : Gravité Moyenne Pondérée par le Volume de Rappels dans la Catégorie. Détecte les catégories les plus dangereuses.")
+            help="Gravité Moyenne Pondérée par le Volume de Rappels dans la Catégorie. 🧭 **Stratégie :** Aide à réorienter les budgets de prévention vers les catégories de produits les plus dangereuses.")
 
     st.markdown("### Analyse de Positionnement et Causes Racines")
     st.markdown("---") # Séparation visuelle
@@ -533,6 +533,8 @@ with tab1:
 
     st.markdown("---")
     # Donut Chart NCF Fournisseur / Matrice Corrélation
+    total_fournisseurs_t1 = 100 # Simulé
+    total_fournisseurs_impactes = 15 # Simulé
     if 'identifiant_de_l_etablissement_d_ou_provient_le_produit' in df_filtered.columns and total_fournisseurs_impactes > 0:
         st.subheader("3. Dépendance au Risque Fournisseur (NCF T1)")
         df_ncf = pd.DataFrame({
@@ -590,38 +592,38 @@ with tab2:
     # LIGNE 1 : PRESSION & CONTEXTE
     with col1:
         st.metric("Total Rappels (Filtré)", total_rappels,
-            help="Nombre total de fiches de rappel publiées, tenant compte de la période et des filtres sélectionnés.")
+            help="Nombre total de fiches de rappel publiées, tenant compte de la période et des filtres sélectionnés. 📈 **Message :** Mesure la **pression volume** globale.")
     with col2:
         st.metric("Score d'Exposition Géographique (Simulé)", "Élevé" if total_rappels > SEUIL_ORANGE_MAX * 5 else "Faible",
-            help="**LEVIER PRESSION GÉOGRAPHIQUE** : Évaluation simplifiée de l'impact potentiel du rappel combinant le volume par zone (Traffic Light) et la densité de population (simulé ici par le volume total).")
+            help="Évaluation simplifiée de l'impact potentiel du rappel (volume et densité). 🗺️ **Logistique :** Un score élevé signifie que la charge logistique et la pression médiatique sont maximales pour les zones de vente concernées.")
     with col3:
         st.metric("Délai Moyen (DM) Avant Rappel", DM_label,
-            help="**LEVIER PRESSION DURÉE** : Vitesse de Réponse (Proxy). Formule : Moyenne des (Date de Publication du rappel - Date Début Commercialisation) en jours.")
+            help="Moyenne des (Date Publication - Date Début Commercialisation) en jours. ⏱️ **Réactivité :** Plus ce délai est long, plus l'exposition du consommateur au risque a été importante (faible réactivité interne).")
     with col4:
         st.metric("Taux d'Anomalie Logistique (TAL)", f"{tal_value:.1f}%",
-            help="**LEVIER PRESSION LOGISTIQUE** : Pourcentage des rappels dont le motif est lié à un défaut de distribution/stockage (température, conditionnement, etc.). **Formule : (Nbre Rappels Cause Logistique / Total Rappels) * 100**.")
+            help="Pourcentage des rappels dont le motif est lié à un défaut de distribution/stockage. 📦 **Chaîne de Froid :** Un TAL élevé pointe directement vers des faiblesses dans le réseau de distribution ou le stockage en magasin.")
         
     # LIGNE 2 : PERFORMANCE & PROJECTION
     with col5:
         st.metric("Délai d'Alerte Précoce (DAP)", f"{dap_value:.1f}%",
-            help="**LEVIER PERFORMANCE ALERTES** : % des rappels dont la durée de commercialisation a été très courte (< 7 jours). Un DAP élevé peut indiquer des systèmes d'alerte externes rapides (bien) ou un délai interne trop long (mal).")
+            help="Proportion des rappels dont la durée de commercialisation a été très courte (< 7 jours). 💡 **Efficacité :** Un DAP élevé peut indiquer que vos systèmes d'alerte internes sont lents, ou au contraire que le contrôle externe est très rapide.")
     with col6:
         st.metric("Coût Logistique Max/Distributeur", f"{COUT_LOGISTIQUE_JOUR_SUPP:,.0f} € / Jour",
-            help="Coût simulé d'un jour d'exposition au risque logistique par rappel. Utilisé pour la matrice de risque distributeur.")
+            help="Coût simulé d'un jour d'exposition au risque logistique par rappel. 💸 **Négociation :** Sert de base pour prioriser les distributeurs ayant le risque de *durée* le plus coûteux.")
     with col7:
         if "distributeurs" in df_filtered.columns:
             df_distrib_exploded = explode_column(df_filtered, 'distributeurs')
             distrib_counts = df_distrib_exploded['distributeurs'].value_counts()
             densite_distrib = distrib_counts.mean() if not distrib_counts.empty else 0.0
             st.metric("Densité Moy. Rappel/Distributeur", f"{densite_distrib:.1f}",
-                help="Mesure la fréquence moyenne des rappels par distributeur unique impliqué. **Formule : Total Rappels (Filtré) / Nombre de Distributeurs Uniques Impliqués**.")
+                help="Total Rappels (Filtré) / Nombre de Distributeurs Uniques Impliqués. ⚖️ **Concentration :** Mesure la fréquence d'incidents chez les partenaires. Un ratio élevé indique une dépendance à des distributeurs plus risqués.")
         else:
             st.metric("Densité Moy. Rappel/Distributeur", "N/A",
-                help="Mesure la fréquence moyenne des rappels par distributeur unique impliqué. **Formule : Total Rappels (Filtré) / Nombre de Distributeurs Uniques Impliqués**.")
+                help="Total Rappels (Filtré) / Nombre de Distributeurs Uniques Impliqués. ⚖️ **Concentration :** Mesure la fréquence d'incidents chez les partenaires. Un ratio élevé indique une dépendance à des distributeurs plus risqués.")
     with col8:
-        taux_couverture_rappel = 85.0
+        taux_couverture_rappel = 85.0 # Simulé
         st.metric("Taux de Couverture du Rappel (TCR) (Simulé)", f"{taux_couverture_rappel:.1f}%", 
-            help="**LEVIER PROJECTION COUVERTURE** : KPI Simulé. Pourcentage des zones géographiques couvertes par une action de retrait documentée (cible : 95%). Mesure l'efficacité du dispositif d'exécution.")
+            help="Pourcentage des zones géographiques couvertes par une action de retrait documentée. ✅ **Conformité :** Évalue l'efficacité et l'exhaustivité de l'exécution du plan de retrait sur le terrain.")
 
 
     st.markdown("### 1. Matrice de Priorisation du Risque Distributeur (Bubble Chart)")
@@ -781,31 +783,31 @@ with tab3:
     # LIGNE 1 : PRESSION & CONTEXTE
     with col1:
         st.metric("Total Rappels (Filtré)", total_rappels,
-            help="Nombre total de fiches de rappel publiées, tenant compte de la période et des filtres sélectionnés.")
+            help="Nombre total de fiches de rappel publiées, tenant compte de la période et des filtres sélectionnés. 📈 **Message :** Mesure la **pression volume** globale.")
     with col2:
         st.metric("% Rappels Graves", pc_risques_graves_str,
-            help="Proportion des rappels dont le risque encouru est jugé grave (ex: micro-organismes pathogènes, corps étrangers, allergènes non déclarés).")
+            help="Proportion des rappels dont le risque est jugé grave. 🛑 **Gravité :** Un taux élevé justifie un renforcement immédiat des contrôles qualité critiques (CCP).")
     with col3:
         st.metric("Taux de Récurrence des Causes Racines (TRCR)", f"{trcr_value:.1f}%",
-            help="**LEVIER PRESSION CORRECTION** : % des rappels qui ont une cause racine (motif) ou un risque déjà identifié dans l'année précédente. Chiffre l'échec des actions correctives.")
+            help="Pourcentage des rappels dont la cause racine a déjà été observée dans le passé. 🔁 **Audit :** Un TRCR élevé indique un **échec des actions correctives** et nécessite un audit du système qualité.")
     with col4:
         if not df_risques_exploded.empty:
             diversite_risques = df_risques_exploded['risques_encourus'].nunique()
             st.metric("Diversité des Risques", diversite_risques, 
-                help="Nombre de types de risques encourus différents identifiés (e.g. Bactérie, Physique, Allergène) dans la période. Une grande diversité peut signaler des problèmes systémiques.")
+                help="Nombre de types de risques encourus différents identifiés. 🤯 **Systémique :** Une grande diversité signale des problèmes de maîtrise générale plutôt qu'un risque ponctuel.")
         else:
             st.metric("Diversité des Risques", "N/A", 
-                help="Nombre de types de risques encourus différents identifiés (e.g. Bactérie, Physique, Allergène) dans la période.")
+                help="Nombre de types de risques encourus différents identifiés. 🤯 **Systémique :** Une grande diversité signale des problèmes de maîtrise générale plutôt qu'un risque ponctuel.")
         
     # LIGNE 2 : PERFORMANCE & PROJECTION
     with col5:
         st.metric("Volatilité IMR (IMR_STD)", f"{imr_std_value:.2f}",
-            help="**LEVIER PERFORMANCE STABILITÉ** : Écart-type (STD) des valeurs mensuelles de l'IMR sur 6 mois. Mesure la stabilité du risque dans le temps. Une forte volatilité = risque non maîtrisé.")
+            help="Écart-type (STD) des valeurs mensuelles de l'IMR sur 6 mois. 🎢 **Stabilité :** Une forte volatilité indique que le risque n'est pas maîtrisé et varie fortement d'un mois à l'autre (imprévisibilité).")
     with col6:
         df_vol = df_filtered.groupby(df_filtered["date_publication"].dt.to_period("M")).size().reset_index(name="Rappels")
         volatilite = df_vol["Rappels"].std() if not df_vol.empty and len(df_vol) > 1 else 0
         st.metric("Volatilité Mensuelle Rappel", f"{volatilite:.1f}",
-            help="Écart-type (STD) du nombre de rappels publiés chaque mois sur la période filtrée. Mesure l'instabilité du volume de rappels.")
+            help="Écart-type (STD) du nombre de rappels publiés chaque mois sur la période filtrée. 🌪️ **Planification :** Une forte volatilité complique la planification des ressources de gestion de crise.")
     with col7:
         if "motif_du_rappel" in df_filtered.columns and "risques_encourus" in df_filtered.columns and not df_filtered.empty:
             df_temp_imr = df_filtered.copy()
@@ -816,12 +818,12 @@ with tab3:
             top_motifs_graves = motif_graves.sort_values(by='score_gravite', ascending=False).head(1)
             
             rmpc = top_motifs_graves['score_gravite'].mean() * 10 if not top_motifs_graves.empty else 0.0
-            st.metric("RMPC (Simulé)", f"{rmpc:.2f}", help="Risque Moyen Pondéré par Catégorie (RMPC) : Gravité moyenne des motifs principaux (échelle de 0 à 20).")
+            st.metric("RMPC (Simulé)", f"{rmpc:.2f}", help="Risque Moyen Pondéré par Catégorie (RMPC). 💡 **Analyse :** Aide à identifier les motifs qui, bien que peu fréquents, portent la plus grande charge de risque (gravité élevée).")
         else:
-            st.metric("RMPC (Simulé)", "N/A", help="Risque Moyen Pondéré par Catégorie (RMPC) : Gravité moyenne des motifs principaux (échelle de 0 à 20).")
+            st.metric("RMPC (Simulé)", "N/A", help="Risque Moyen Pondéré par Catégorie (RMPC). 💡 **Analyse :** Aide à identifier les motifs qui, bien que peu fréquents, portent la plus grande charge de risque (gravité élevée).")
     with col8:
         st.metric("Ratio Risque/Opportunité (RRO)", f"{rro_value:.2f}",
-            help="**LEVIER PROJECTION R&D** : Simule si le niveau de risque (IMR) est justifié par l'activité ou l'innovation dans la catégorie (mesuré par la fréquence des rappels marché). Un score bas est souhaitable.")
+            help="Simule si le niveau de risque (IMR) est justifié par l'activité dans la catégorie. 🚀 **R&D :** Un score élevé (mauvais) suggère que l'entreprise prend des risques disproportionnés par rapport à l'activité concurrentielle du secteur.")
 
 
     st.markdown("### 1. Tendance : Dérive des Causes Racines (DCR) - Taux d'Émergence des Motifs")
