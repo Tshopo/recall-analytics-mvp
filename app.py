@@ -502,7 +502,7 @@ with tab2:
         df_geo = explode_column(df_filtered, "zone_geographique_de_vente")
         
         # Tentative d'extraction du code départemental/régional (très simplifié)
-        df_geo['zone_clean'] = df_geo['zone_geographique_de_vente'].str.extract(r'(\d{2,3})') # Extraire les nombres à 2 ou 3 chiffres (code postal/dept)
+        df_geo['zone_clean'] = df_geo['zone_geographique_de_vente'].str.extract(r'(\d{2,3})') 
         df_geo.loc[df_geo['zone_clean'].isna(), 'zone_clean'] = df_geo.loc[df_geo['zone_clean'].isna(), 'zone_geographique_de_vente'].str.split('-').str[0].str.strip()
         df_geo = df_geo.dropna(subset=['zone_clean'])
         
@@ -512,8 +512,6 @@ with tab2:
         if not geo_counts.empty:
             # Attribution du Traffic Light
             geo_counts['Niveau_Risque'] = geo_counts['Nombre_Rappels'].apply(get_traffic_light)
-            
-            # --- Affichage de l'alternative Traffic Light (Tableau) ---
             
             # Affichage de la carte Choropleth si GeoJSON disponible (avec attribution de couleur)
             geojson_data = load_geojson()
@@ -532,28 +530,32 @@ with tab2:
                                             geojson=geojson_data,
                                             locations='zone_clean',
                                             featureidkey="properties.code", 
-                                            color='Couleur', # Utilisation de la colonne de couleur
+                                            color='Couleur', 
                                             color_discrete_map={'green': '#2ECC71', 'orange': '#F39C12', 'red': '#E74C3C'},
-                                            scope='europe', # Ou 'france' si disponible
+                                            scope='europe', 
                                             title="Répartition Géospatiale du Risque (Traffic Light)",
                                             height=500)
                     fig_map.update_geos(fitbounds="locations", visible=False)
                     st.plotly_chart(fig_map, use_container_width=True)
                 except Exception:
                     st.warning("⚠️ Impossible d'afficher la carte Choropleth (GeoJSON manquant). Affichage du tableau de bord Traffic Light.")
+                    
+                    # FIX #1: Utilisation du nom de colonne renommé 'Nbre de Rappels' pour le tri
                     st.dataframe(geo_counts[['zone_clean', 'Nombre_Rappels', 'Niveau_Risque']].rename(columns={
                         'zone_clean': 'Zone Géographique', 
                         'Nombre_Rappels': 'Nbre de Rappels'
-                    }).sort_values(by='Nombre_Rappels', ascending=False), 
+                    }).sort_values(by='Nbre de Rappels', ascending=False), 
                     hide_index=True, use_container_width=True)
 
             else:
                 # Affichage du tableau de bord Traffic Light (par défaut si pas de GeoJSON)
                 st.info("Impossible de charger la carte Choropleth. Affichage du tableau de bord Traffic Light par Zone de Vente.")
+                
+                # FIX #2: Utilisation du nom de colonne renommé 'Nbre de Rappels' pour le tri
                 st.dataframe(geo_counts[['zone_clean', 'Nombre_Rappels', 'Niveau_Risque']].rename(columns={
                     'zone_clean': 'Zone Géographique', 
                     'Nombre_Rappels': 'Nbre de Rappels'
-                }).sort_values(by='Nombre_Rappels', ascending=False), 
+                }).sort_values(by='Nbre de Rappels', ascending=False), 
                 hide_index=True, use_container_width=True)
                 
         else:
