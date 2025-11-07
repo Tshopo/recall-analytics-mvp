@@ -190,7 +190,7 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
         if "date_debut_commercialisation" in df.columns:
             df["date_debut_commercialisation"] = pd.to_datetime(df["date_debut_commercialisation"], errors="coerce", utc=True)
 
-        for col in ["distributeurs", "zone_geographique_de_vente", "risques_encourus", "motif_du_rappel", "categorie_de_produit", "nom_marque_du_produit", "identifiant_de_l_etablissement_d_ou_provient_le_produit", "etat_fiche", "denomination_vente"]:
+        for col in ["distributeurs", "zone_geographique_de_vente", "risques_encourus", "motif_du_rappel", "categorie_de_produit", "nom_marque_du_produit", "identifiant_de_l_etablissement_d_ou_provient_le_produit", "etat_fiche", "denomination_vente", "sous_categorie_produit"]:
             if col in df.columns:
                 df[col] = (df[col].astype(str)
                                  .str.lower()
@@ -551,6 +551,26 @@ tab1, tab2, tab3 = st.tabs(["🏭 Fabricants & Marques", "🛒 Distributeurs & R
 with tab1:
     st.header("🎯 Intelligence Concurrentielle & Maîtrise du Risque Fournisseur")
     
+    # --- FEUILLE DE ROUTE FABRICANTS ---
+    with st.expander("📖 Feuille de Route : Filtrage et Interprétation pour Fabricants/Marques"):
+        st.markdown("""
+        Cet onglet est conçu pour les équipes de **Direction Générale**, **Qualité Produit**, et **Achats**.
+        
+        ### ⚙️ Stratégie de Filtrage Recommandée
+        | Étape | Filtre à Appliquer | Objectif du Filtre |
+        | :---: | :--- | :--- |
+        | **1.** | **Période d'Analyse** | Sélectionnez **"12 derniers mois"** pour une vue annuelle stable, ou **"3 derniers mois"** pour identifier rapidement les tendances émergentes. |
+        | **2.** | **Catégorie de Produit** | **Filtrer par votre Catégorie principale.** Calibre l'IMR du Marché (benchmark) et concentre l'analyse sur vos concurrents directs. |
+        | **3.** | **Marque (Benchmarking)** | **Sélectionnez votre propre marque** (et non "Toutes"). Active le calcul de l'IMR de la Marque, de l'IPC et de la Tendance. |
+        
+        ### 📊 Interprétation des Indicateurs Clés
+        | Indicateur (KPI) | Lecture et Objectif | Interprétation Stratégique |
+        | :--- | :--- | :--- |
+        | **IMR de la Marque** | Mesure la gravité pondérée des rappels de votre marque. **Cible : le plus bas possible (ex: < 5)**. | **Performance :** S'il est **élevé (ex: > 10)**, vous avez un problème de maîtrise du risque grave, souvent lié à la sécurité alimentaire (Listeria, Salmonella). |
+        | **Indice de Pression Concurrentielle (IPC)** | Votre IMR / IMR du Marché. **Cible : < 1.0 (Idéalement 0.90-0.95)**. | **Benchmarking :** Si **IPC > 1.0**, vous êtes **moins performant/plus risqué** que la moyenne de votre catégorie. Si **IPC < 1.0**, vous avez un avantage concurrentiel sur la maîtrise du risque. |
+        | **Taux d'Impact Fournisseur Critique (TIFC)** | % des rappels dont la cause est externe. **Cible : le plus bas possible (< 5%)**. | **Achats/Fournisseurs :** Un TIFC élevé pointe un défaut dans l'audit ou la spécification de vos fournisseurs T1. |
+        """)
+    
     # --- KPI FABRICANT (4 colonnes x 2 lignes = 8 KPIs) ---
     col1, col2, col3, col4 = st.columns(4)
     col5, col6, col7, col8 = st.columns(4)
@@ -707,6 +727,27 @@ with tab1:
 # ----------------------------------------------------------------------
 with tab2:
     st.header("🛒 Analyse du Canal de Distribution & Risque Logistique")
+
+    # --- FEUILLE DE ROUTE DISTRIBUTEURS ---
+    with st.expander("📖 Feuille de Route : Filtrage et Interprétation pour Distributeurs/Retailers"):
+        st.markdown("""
+        Cet onglet est conçu pour les équipes de **Supply Chain**, **Logistique**, et **Opérations Commerciales**.
+
+        ### ⚙️ Stratégie de Filtrage Recommandée
+        | Étape | Filtre à Appliquer | Objectif du Filtre |
+        | :---: | :--- | :--- |
+        | **1.** | **Période d'Analyse** | **"12 ou 6 derniers mois"** pour analyser l'efficacité de vos procédures de retrait/rappel et les risques logistiques. |
+        | **2.** | **Distributeur (Canal)** | **Sélectionnez votre réseau ou un concurrent.** Isole l'impact des rappels au sein du canal spécifique pour le benchmark. |
+        | **3.** | **Motif de Rappel** | **(Optionnel)** Filtrer sur les motifs logistiques (ex: "température", "rupture") pour calculer le Taux d'Anomalie Logistique (TAL) spécifique. |
+        | **4.** | **Lieu de Vente (Zone Géographique)** | **(Optionnel)** Isole une région ou un département pour analyser les problématiques locales. |
+
+        ### 📊 Interprétation des Indicateurs Clés
+        | Indicateur (KPI) | Lecture et Objectif | Interprétation Stratégique |
+        | :--- | :--- | :--- |
+        | **Délai Moyen (DM) Avant Rappel** | Durée moyenne entre la commercialisation et la publication du rappel. **Cible : le plus bas possible**. | **Réactivité :** Un DM long signifie une exposition prolongée des consommateurs. Implique une amélioration des alertes en magasin et des systèmes d'information. |
+        | **Taux d'Anomalie Logistique (TAL)** | % des rappels liés à des causes de transport, stockage ou distribution. **Cible : le plus bas possible (< 3%)**. | **Supply Chain :** Un TAL élevé pointe directement des faiblesses dans le réseau de distribution, le respect de la chaîne du froid, ou le stockage en entrepôt. |
+        | **Matrice de Priorisation du Risque** | Classement des distributeurs selon la fréquence et le délai avant rappel. | **Négociation/Audit :** Les partenaires dans le quadrant **"Risque Élevé"** (Fréquence Élevée + Délai Long) sont les plus coûteux et doivent être audités en priorité. |
+        """)
 
     # --- KPI DISTRIBUTEUR (4 colonnes x 2 lignes = 8 KPIs) ---
     col1, col2, col3, col4 = st.columns(4)
@@ -898,7 +939,29 @@ with tab2:
 # ----------------------------------------------------------------------
 with tab3:
     st.header("🔬 Évaluation de la Gravité et Tendance du Risque (Assurance & Conseil)")
+    
+    # --- FEUILLE DE ROUTE CONFORMITÉ ---
+    with st.expander("📖 Feuille de Route : Filtrage et Interprétation pour Risque/Conformité/Audit"):
+        st.markdown("""
+        Cet onglet est conçu pour les équipes d'**Audit Interne**, **Qualité/HACCP** et les **Consultants en Risque**.
 
+        ### ⚙️ Stratégie de Filtrage Recommandée
+        | Étape | Filtre à Appliquer | Objectif du Filtre |
+        | :---: | :--- | :--- |
+        | **1.** | **Période d'Analyse** | **"12 derniers mois"** pour la Volatilité IMR (IMR_STD) ou **"Toute la période"** pour le Taux de Récurrence (TRCR). |
+        | **2.** | **Catégorie de Produit** | **Sélectionner la catégorie la plus risquée** (celle avec l'IMR le plus élevé dans l'onglet 1) pour une analyse approfondie. |
+        | **3.** | **Marque / Nature du Produit** | **(Optionnel)** Isolez les produits spécifiques pour comprendre l'origine de la Volatilité (DCR). |
+        | **4.** | **Statut de la Fiche** | Filtrer sur **"Rappel en cours"** pour évaluer la charge de risque actuelle non résolue. |
+
+        ### 📊 Interprétation des Indicateurs Clés
+        | Indicateur (KPI) | Lecture et Objectif | Interprétation Stratégique |
+        | :--- | :--- | :--- |
+        | **% Rappels Graves** | Proportion de rappels concernant des risques majeurs (Listeria, Salmonelle, corps étranger). **Cible : 0%**. | **Audit Critique :** Si > 5%, révision urgente des CCP (Critical Control Points) et des plans HACCP. |
+        | **Volatilité IMR (IMR_STD)** | Mesure l'instabilité de votre risque dans le temps (Écart-type de l'IMR mensuel). **Cible : le plus bas possible**. | **Maîtrise :** Une forte volatilité indique un manque de stabilité dans le système qualité (contrôles non systématiques ou aléatoires). |
+        | **Taux de Récurrence des Causes Racines (TRCR)** | % des rappels liés à une cause déjà observée (ex: Listeria récurrente). **Cible : 0%**. | **Échec Correctif :** Un TRCR élevé indique que les actions correctives (CAPA) précédentes n'ont pas été efficaces. Nécessite un audit du processus de gestion des non-conformités. |
+        | **Dérive des Causes Racines (DCR)** | Graphique de tendance du classement des motifs. | **Veille Réglementaire :** Si un motif monte rapidement dans le classement (ex: étiquetage), cela peut indiquer un nouveau manquement réglementaire ou une dérive d'un fournisseur T1. |
+        """)
+    
     # --- KPI CONFORMITÉ (4 colonnes x 2 lignes = 8 KPIs) ---
     col1, col2, col3, col4 = st.columns(4)
     col5, col6, col7, col8 = st.columns(4)
