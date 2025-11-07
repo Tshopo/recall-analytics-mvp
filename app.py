@@ -169,7 +169,8 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
             "numero_fiche": "reference_fiche",
             "lien_vers_la_fiche_rappel": "liens_vers_la_fiche_rappel",
             "date_debut_commercialisation_produit": "date_debut_commercialisation",
-            "nom_fabricant_ou_marque": "nom_marque_du_produit" 
+            "nom_fabricant_ou_marque": "nom_marque_du_produit",
+            "denomination_sociale_du_producteur": "nom_marque_du_produit" # Ajout potentiel
         }
         
         rename_dict = {old_name: new_name for old_name, new_name in column_mapping.items() if old_name in df.columns and old_name != new_name}
@@ -189,7 +190,7 @@ def load_data_from_csv(file_path="rappelconso_export.csv"):
         if "date_debut_commercialisation" in df.columns:
             df["date_debut_commercialisation"] = pd.to_datetime(df["date_debut_commercialisation"], errors="coerce", utc=True)
 
-        for col in ["distributeurs", "zone_geographique_de_vente", "risques_encourus", "motif_du_rappel", "categorie_de_produit", "nom_marque_du_produit", "identifiant_de_l_etablissement_d_ou_provient_le_produit"]:
+        for col in ["distributeurs", "zone_geographique_de_vente", "risques_encourus", "motif_du_rappel", "categorie_de_produit", "nom_marque_du_produit", "identifiant_de_l_etablissement_d_ou_provient_le_produit", "etat_fiche", "denomination_vente"]:
             if col in df.columns:
                 df[col] = (df[col].astype(str)
                                  .str.lower()
@@ -229,6 +230,10 @@ def safe_filter_list(df_source, col_name, exploded=False):
     if col_name in df_work.columns and not df_work.empty:
         raw_list = df_work[col_name].dropna().astype(str).unique().tolist()
         valid_list = [s.strip() for s in raw_list if s.strip() and s.strip() != 'nan']
+        # Limite le nombre d'options si la liste est trop longue (par exemple, pour la dénomination de vente)
+        if len(valid_list) > 1000:
+            st.sidebar.warning(f"Liste trop longue pour {col_name}. Affichage des 1000 premières.")
+            return ["Toutes"] + sorted(list(set(valid_list[:1000])))
         return ["Toutes"] + sorted(list(set(valid_list)))
     
     return ["Toutes"]
@@ -258,18 +263,16 @@ if "date_publication" in df_temp.columns:
     }
     
     st.sidebar.header("⚙️ Filtres Transversaux")
-    periode = st.sidebar.selectbox("Période d'Analyse", list(periode_options.keys()))
     
+    # 1. Période
+    periode = st.sidebar.selectbox("Période d'Analyse", list(periode_options.keys()))
     offset = periode_options[periode]
     if offset:
         df_temp = df_temp[df_temp["date_publication"] >= now - offset]
     else:
-        # Assurez-vous que le df_temp contient toutes les dates si "Toute la période" est sélectionné
         df_temp = df.copy() 
 
-# --- SIDEBAR: FILTRES GLOBAUX ---
-
-# 1. Catégorie de Produit
+# 2. Catégorie de Produit
 categories = safe_filter_list(df_temp, "categorie_de_produit")
 cat = st.sidebar.selectbox("Catégorie de Produit", categories)
 
@@ -278,24 +281,39 @@ df_coherence = df_temp.copy()
 if cat != "Toutes" and "categorie_de_produit" in df_coherence.columns:
     df_coherence = df_coherence[df_coherence["categorie_de_produit"] == cat]
     
-# 2. Marque (Benchmarking) - COHÉRENCE AVEC LA CATÉGORIE
+# 3. Marque (Benchmarking) - COHÉRENCE AVEC LA CATÉGORIE
 marques_coherentes = safe_filter_list(df_coherence, "nom_marque_du_produit")
-
-# Réinitialisation si la marque sélectionnée n'est pas dans la liste cohérente
 current_marque_selection = st.session_state['selected_marque']
 if current_marque_selection not in marques_coherentes:
     current_marque_selection = "Toutes"
-
 marque = st.sidebar.selectbox("Marque (Benchmarking)", marques_coherentes, index=marques_coherentes.index(current_marque_selection))
 st.session_state['selected_marque'] = marque # Sauvegarde pour le prochain cycle
 
-# 3. Distributeur
+# --- NOUVEAUX FILTRES BASÉS SUR LES AUTRES CHAMPS ---
+
+# 4. Sous-Catégorie / Nature du Produit
+col_nature = "denomination_vente"
+if "sous_categorie_produit" in df.columns:
+    col_nature = "sous_categorie_produit"
+    
+nature_list = safe_filter_list(df_coherence, col_nature)
+nature = st.sidebar.selectbox(f"Nature du Produit ({col_nature.replace('_', ' ').title()})", nature_list)
+
+# 5. Distributeur (Canal)
 distributeurs_list = safe_filter_list(df_coherence, "distributeurs", exploded=True)
 distrib = st.sidebar.selectbox("Distributeur (Canal)", distributeurs_list)
 
-# 4. Motif
+# 6. Motif de Rappel (Cause)
 motifs_list = safe_filter_list(df_coherence, "motif_du_rappel")
-motif = st.sidebar.selectbox("Motif de Rappel", motifs_list)
+motif = st.sidebar.selectbox("Motif de Rappel (Cause)", motifs_list)
+
+# 7. Lieu de Vente (Zone Géographique)
+zone_list = safe_filter_list(df_coherence, "zone_geographique_de_vente", exploded=True)
+zone = st.sidebar.selectbox("Lieu de Vente (Zone Géographique)", zone_list)
+
+# 8. Statut de la Fiche
+statut_list = safe_filter_list(df_coherence, "etat_fiche")
+statut = st.sidebar.selectbox("Statut de la Fiche", statut_list)
 
 
 # --- APPLICATION FINALE DES FILTRES SUR LE DATAFRAME GLOBAL ---
@@ -312,15 +330,26 @@ if cat != "Toutes" and "categorie_de_produit" in df_filtered.columns:
 # 3. Marque
 if marque != "Toutes" and "nom_marque_du_produit" in df_filtered.columns:
     df_filtered = df_filtered[df_filtered["nom_marque_du_produit"] == marque]
-    
-# 4. Motif
-if motif != "Toutes" and "motif_du_rappel" in df_filtered.columns:
-    df_filtered = df_filtered[df_filtered["motif_du_rappel"] == motif]
 
+# 4. Nature du Produit
+if nature != "Toutes" and col_nature in df_filtered.columns:
+    df_filtered = df_filtered[df_filtered[col_nature] == nature]
+    
 # 5. Distributeur
 if distrib != "Toutes" and "distributeurs" in df_filtered.columns:
     df_filtered = df_filtered[df_filtered["distributeurs"].str.contains(distrib, case=False, na=False)]
 
+# 6. Motif
+if motif != "Toutes" and "motif_du_rappel" in df_filtered.columns:
+    df_filtered = df_filtered[df_filtered["motif_du_rappel"].str.contains(motif, case=False, na=False)]
+
+# 7. Zone
+if zone != "Toutes" and "zone_geographique_de_vente" in df_filtered.columns:
+    df_filtered = df_filtered[df_filtered["zone_geographique_de_vente"].str.contains(zone, case=False, na=False)]
+    
+# 8. Statut
+if statut != "Toutes" and "etat_fiche" in df_filtered.columns:
+    df_filtered = df_filtered[df_filtered["etat_fiche"] == statut]
 
 # --- 4. CALCULS TRANSVERSAUX (KPIs) ---
 total_rappels = len(df_filtered)
@@ -494,7 +523,6 @@ if total_rappels > 0 and "categorie_de_produit" in df_filtered.columns:
         imr_cat_marche = imr_marche_comp
 
     if imr_cat_marche > 0 and cat != "Toutes" and cat in rappels_par_cat:
-        # RRO = (IMR Marque) / (IMR Catégorie Marché) * (Rappels Marché dans la Catégorie / Total Rappels Marché)
         # RRO = IMR_Marque / IMR_Catégorie_Marché (Facteur de risque pur)
         rro_value = imr_marque / imr_cat_marche 
     else:
@@ -502,7 +530,7 @@ if total_rappels > 0 and "categorie_de_produit" in df_filtered.columns:
 
 
 # --- CALCUL DES COULEURS TRAFFIC LIGHT ---
-# 1. IMR de la Marque (plus bas est mieux)
+# 1. IMR de la Marque (plus bas est meilleur)
 imr_marque_delta = imr_marque - (SEUIL_IMR_ALERTE / 2) # Arbitraire pour simuler une 'variation' par rapport à un objectif de 5
 imr_marque_color = get_delta_color(imr_marque, SEUIL_IMR_ALERTE, inverse=True)
 
